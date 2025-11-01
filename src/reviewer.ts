@@ -7,7 +7,7 @@ import { Spinner, bell } from "./spinner";
 
 export interface ReviewOptions {
   prUrlOrNumber: string;
-  contextPath: string;
+  contextPath?: string;
   repo?: string;
   anthropicKey: string;
   githubToken: string;
@@ -16,20 +16,30 @@ export interface ReviewOptions {
 
 export async function reviewPR(options: ReviewOptions): Promise<void> {
   const startTime = performance.now();
-  const { prUrlOrNumber, contextPath, repo, anthropicKey, githubToken, saveTo } =
-    options;
+  const {
+    prUrlOrNumber,
+    contextPath,
+    repo,
+    anthropicKey,
+    githubToken,
+    saveTo,
+  } = options;
 
   // Load context file
   let reviewContext = "";
-  if (existsSync(contextPath)) {
-    const contextSpinner = new Spinner(`Loading review context from ${contextPath}`);
-    contextSpinner.start();
-    reviewContext = await readFile(contextPath, "utf-8");
-    contextSpinner.succeed(`Loaded review context from ${contextPath}`);
-  } else {
-    console.warn(
-      `⚠️  Warning: Context file not found at ${contextPath}. Proceeding without custom context.`
-    );
+  if (contextPath) {
+    if (existsSync(contextPath)) {
+      const contextSpinner = new Spinner(
+        `Loading review context from ${contextPath}`
+      );
+      contextSpinner.start();
+      reviewContext = await readFile(contextPath, "utf-8");
+      contextSpinner.succeed(`Loaded review context from ${contextPath}`);
+    } else {
+      console.warn(
+        `⚠️  Warning: Context file not found at ${contextPath}. Proceeding without custom context.`
+      );
+    }
   }
 
   // Fetch PR information with timing
@@ -88,7 +98,8 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
   console.log();
 
   const textContent = message.content.find((block) => block.type === "text");
-  const reviewText = textContent && textContent.type === "text" ? textContent.text : "";
+  const reviewText =
+    textContent && textContent.type === "text" ? textContent.text : "";
 
   if (reviewText) {
     console.log(reviewText);
@@ -106,8 +117,14 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
   console.log(`\n💰 Token Usage & Cost:`);
   console.log(`   Input tokens: ${inputTokens.toLocaleString()}`);
   console.log(`   Output tokens: ${outputTokens.toLocaleString()}`);
-  console.log(`   Total tokens: ${(inputTokens + outputTokens).toLocaleString()}`);
-  console.log(`   Cost: $${totalCost.toFixed(4)} ($${inputCost.toFixed(4)} input + $${outputCost.toFixed(4)} output)`);
+  console.log(
+    `   Total tokens: ${(inputTokens + outputTokens).toLocaleString()}`
+  );
+  console.log(
+    `   Cost: $${totalCost.toFixed(4)} ($${inputCost.toFixed(
+      4
+    )} input + $${outputCost.toFixed(4)} output)`
+  );
   console.log(
     `\n🔗 Review URL: https://github.com/${prInfo.owner}/${prInfo.repo}/pull/${prInfo.prNumber}`
   );
@@ -154,7 +171,10 @@ async function saveReviewToFile(
 
   // Generate filename: repo-name_pr-123_2024-01-15.md
   const date = new Date().toISOString().split("T")[0];
-  const repoName = `${prInfo.owner}-${prInfo.repo}`.replace(/[^a-zA-Z0-9-_]/g, "_");
+  const repoName = `${prInfo.owner}-${prInfo.repo}`.replace(
+    /[^a-zA-Z0-9-_]/g,
+    "_"
+  );
   const filename = `${repoName}_pr-${prInfo.prNumber}_${date}.md`;
   const filePath = join(savePath, filename);
 
@@ -163,7 +183,9 @@ async function saveReviewToFile(
 title: "PR Review: ${prInfo.title}"
 repository: ${prInfo.owner}/${prInfo.repo}
 pr_number: ${prInfo.prNumber}
-pr_url: https://github.com/${prInfo.owner}/${prInfo.repo}/pull/${prInfo.prNumber}
+pr_url: https://github.com/${prInfo.owner}/${prInfo.repo}/pull/${
+    prInfo.prNumber
+  }
 review_date: ${new Date().toISOString()}
 input_tokens: ${metadata.inputTokens}
 output_tokens: ${metadata.outputTokens}
@@ -179,13 +201,17 @@ total_time_ms: ${Math.round(metadata.totalDuration)}
 **Repository:** ${prInfo.owner}/${prInfo.repo}
 **PR Number:** #${prInfo.prNumber}
 **Review Date:** ${date}
-**PR URL:** https://github.com/${prInfo.owner}/${prInfo.repo}/pull/${prInfo.prNumber}
+**PR URL:** https://github.com/${prInfo.owner}/${prInfo.repo}/pull/${
+    prInfo.prNumber
+  }
 
 ## Review Metrics
 
 - **Input Tokens:** ${metadata.inputTokens.toLocaleString()}
 - **Output Tokens:** ${metadata.outputTokens.toLocaleString()}
-- **Total Tokens:** ${(metadata.inputTokens + metadata.outputTokens).toLocaleString()}
+- **Total Tokens:** ${(
+    metadata.inputTokens + metadata.outputTokens
+  ).toLocaleString()}
 - **Cost:** $${metadata.totalCost.toFixed(4)}
 - **GitHub API Time:** ${(metadata.githubDuration / 1000).toFixed(2)}s
 - **Claude API Time:** ${(metadata.claudeDuration / 1000).toFixed(2)}s
