@@ -1,0 +1,7 @@
+{
+  "defaultGuidelines": "./review-context.md",
+  "repoGuidelines": {
+    "owner/repo-name": "./guidelines/repo-specific.md",
+    "another-org/project": "./guidelines/another-project.md"
+  }
+}
