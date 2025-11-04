@@ -1,9 +1,20 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { fetchPRInfo } from "./github";
+import type { PRInfo } from "./github";
 import { existsSync, mkdirSync } from "fs";
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { Spinner, bell } from "./spinner";
+
+// Model configuration
+const MODEL = "claude-haiku-4-5-20251001" as const;
+const MAX_TOKENS = 4000;
+
+// Pricing (per million tokens)
+const PRICING = {
+  input: 0.25,
+  output: 1.25,
+} as const;
 
 export interface ReviewOptions {
   prUrlOrNumber: string;
@@ -67,8 +78,8 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
   claudeSpinner.start();
   const claudeStartTime = performance.now();
   const message = await anthropic.messages.create({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 4000,
+    model: MODEL,
+    max_tokens: MAX_TOKENS,
     messages: [
       {
         role: "user",
@@ -85,10 +96,9 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
   const inputTokens = message.usage.input_tokens;
   const outputTokens = message.usage.output_tokens;
 
-  // Claude Haiku pricing (as of late 2024)
-  // Input: $0.25 per million tokens, Output: $1.25 per million tokens
-  const inputCost = (inputTokens / 1_000_000) * 0.25;
-  const outputCost = (outputTokens / 1_000_000) * 1.25;
+  // Calculate costs using pricing constants
+  const inputCost = (inputTokens / 1_000_000) * PRICING.input;
+  const outputCost = (outputTokens / 1_000_000) * PRICING.output;
   const totalCost = inputCost + outputCost;
 
   // Display the review
@@ -160,7 +170,7 @@ interface ReviewMetadata {
 
 async function saveReviewToFile(
   savePath: string,
-  prInfo: any,
+  prInfo: PRInfo,
   reviewContent: string,
   metadata: ReviewMetadata
 ): Promise<string> {
@@ -228,10 +238,10 @@ ${reviewContent}
   return filePath;
 }
 
-function buildReviewPrompt(prInfo: any, reviewContext: string): string {
+function buildReviewPrompt(prInfo: PRInfo, reviewContext: string): string {
   const filesInfo = prInfo.files
     .map(
-      (f: any) =>
+      (f) =>
         `- ${f.filename} (${f.status}, +${f.additions}/-${f.deletions})`
     )
     .join("\n");
@@ -248,25 +258,26 @@ ${prInfo.description || "No description provided"}
 **Files Changed:**
 ${filesInfo}
 
+# Pull Request Diff
+
+\`\`\`diff
+${prInfo.diff}
+\`\`\`
+
 `;
 
+  // Show guidelines AFTER the code, so Claude can apply them with full context
   if (reviewContext) {
     prompt += `# Review Context and Guidelines
 
-The following context has been provided to guide your review:
+The following context and guidelines should be applied when reviewing the code above:
 
 ${reviewContext}
 
 `;
   }
 
-  prompt += `# Pull Request Diff
-
-\`\`\`diff
-${prInfo.diff}
-\`\`\`
-
-# Review Instructions
+  prompt += `# Review Instructions
 
 Please provide a comprehensive code review that includes:
 
@@ -274,10 +285,10 @@ Please provide a comprehensive code review that includes:
 2. **Strengths:** What's done well in this PR
 3. **Issues:** Any bugs, security concerns, or logic errors
 4. **Code Quality:** Comments on code structure, readability, and best practices
-5. **Suggestions:** Specific recommendations for improvements
-${
+5. **Suggestions:** Specific recommendations for improvements${
   reviewContext
-    ? "6. **Architecture/Guidelines Compliance:** How well the PR follows the provided guidelines"
+    ? `
+6. **Architecture/Guidelines Compliance:** Evaluate how well the code above follows the provided guidelines. Specifically check for violations of the architectural patterns, coding standards, and best practices mentioned in the guidelines section.`
     : ""
 }
 
