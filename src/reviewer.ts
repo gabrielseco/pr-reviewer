@@ -241,8 +241,7 @@ ${reviewContent}
 function buildReviewPrompt(prInfo: PRInfo, reviewContext: string): string {
   const filesInfo = prInfo.files
     .map(
-      (f) =>
-        `- ${f.filename} (${f.status}, +${f.additions}/-${f.deletions})`
+      (f) => `- ${f.filename} (${f.status}, +${f.additions}/-${f.deletions})`
     )
     .join("\n");
 
@@ -277,22 +276,71 @@ ${reviewContext}
 `;
   }
 
-  prompt += `# Review Instructions
+  prompt += `# Code Review Instructions
 
-Please provide a comprehensive code review that includes:
+Please provide a code review with the following sections:
 
-1. **Summary:** Brief overview of the changes
-2. **Strengths:** What's done well in this PR
-3. **Issues:** Any bugs, security concerns, or logic errors
-4. **Code Quality:** Comments on code structure, readability, and best practices
-5. **Suggestions:** Specific recommendations for improvements${
-  reviewContext
-    ? `
-6. **Architecture/Guidelines Compliance:** Evaluate how well the code above follows the provided guidelines. Specifically check for violations of the architectural patterns, coding standards, and best practices mentioned in the guidelines section.`
-    : ""
-}
+## 1. Summary
 
-Please be constructive and specific in your feedback.`;
+Brief overview of what this PR changes.
+
+## 2. Strengths
+
+What the code does well (e.g., clear logic, good error handling, follows patterns).
+
+## 3. Critical Issues ONLY
+
+**IMPORTANT: Only report issues that would cause:**
+
+- Runtime crashes or errors
+- Type mismatches that a compiler like Elixir, TypeScript, or Rust would catch
+- Logic bugs that produce wrong results
+- Security vulnerabilities
+- Data loss or corruption
+
+Do NOT report:
+
+- Theoretical concerns or "what-ifs"
+- Defensive programming patterns (optional chaining + fallbacks are good)
+- Different calculations for different purposes
+- Safe fallback values (e.g., \`?? 'Unknown'\`)
+- Code that works correctly but could be "slightly better"
+
+If there are NO critical issues, say "No critical issues found."
+
+## 4. Code Quality
+
+Comment ONLY on:
+
+- Naming clarity (is the purpose obvious?)
+- Readability (is it easy to follow?)
+- Actual violations of the project's patterns (reference the guidelines if applicable)
+
+Skip minor style preferences.
+
+## 5. Suggestions (Optional)
+
+Only include if there's a clear, actionable improvement that:
+
+- Simplifies the code
+- Improves performance
+- Fixes a real bug
+- Adds missing edge case handling
+
+If nothing qualifies, skip this section.${
+    reviewContext
+      ? `
+
+## 6. Architecture/Guidelines Compliance
+
+Check if the code follows the architectural patterns and guidelines provided above.
+Only flag violations of actual documented patterns, not suggestions for how it "could" be written.`
+      : ""
+  }
+
+---
+
+**Important:** Be specific and cite exact line numbers. Avoid vague concerns.`;
 
   return prompt;
 }
