@@ -214,13 +214,13 @@ async function saveReviewToFile(
     mkdirSync(savePath, { recursive: true });
   }
 
-  // Generate filename: repo-name_pr-123_2024-01-15.md
+  // Generate filename: repo-name_pr-123_haiku_2024-01-15.md
   const date = new Date().toISOString().split("T")[0];
   const repoName = `${prInfo.owner}-${prInfo.repo}`.replace(
     /[^a-zA-Z0-9-_]/g,
     "_"
   );
-  const filename = `${repoName}_pr-${prInfo.prNumber}_${date}.md`;
+  const filename = `${repoName}_pr-${prInfo.prNumber}_${metadata.model}_${date}.md`;
   const filePath = join(savePath, filename);
 
   // Create markdown content with metadata
