@@ -7,13 +7,34 @@ import { join } from "path";
 import { Spinner, bell } from "./spinner";
 
 // Model configuration
-const MODEL = "claude-haiku-4-5-20251001" as const;
-const MAX_TOKENS = 4000;
+type ModelName = "haiku" | "sonnet";
 
-// Pricing (per million tokens)
-const PRICING = {
-  input: 0.25,
-  output: 1.25,
+interface ModelConfig {
+  id: string;
+  maxTokens: number;
+  pricing: {
+    input: number;
+    output: number;
+  };
+}
+
+const MODELS: Record<ModelName, ModelConfig> = {
+  haiku: {
+    id: "claude-haiku-4-5-20251001",
+    maxTokens: 4000,
+    pricing: {
+      input: 0.25, // per million tokens
+      output: 1.25,
+    },
+  },
+  sonnet: {
+    id: "claude-sonnet-4-5-20250929",
+    maxTokens: 4000,
+    pricing: {
+      input: 3.0, // per million tokens
+      output: 15.0,
+    },
+  },
 } as const;
 
 export interface ReviewOptions {
@@ -23,6 +44,7 @@ export interface ReviewOptions {
   anthropicKey: string;
   githubToken: string;
   saveTo?: string;
+  model?: ModelName;
 }
 
 export async function reviewPR(options: ReviewOptions): Promise<void> {
@@ -34,7 +56,11 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
     anthropicKey,
     githubToken,
     saveTo,
+    model = "haiku",
   } = options;
+
+  // Get model configuration
+  const modelConfig = MODELS[model];
 
   // Load context file
   let reviewContext = "";
@@ -74,12 +100,14 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
   const prompt = buildReviewPrompt(prInfo, reviewContext);
 
   // Call Claude API with timing
-  const claudeSpinner = new Spinner("Generating review with Claude AI");
+  const claudeSpinner = new Spinner(
+    `Generating review with Claude AI (${model})`
+  );
   claudeSpinner.start();
   const claudeStartTime = performance.now();
   const message = await anthropic.messages.create({
-    model: MODEL,
-    max_tokens: MAX_TOKENS,
+    model: modelConfig.id,
+    max_tokens: modelConfig.maxTokens,
     messages: [
       {
         role: "user",
@@ -89,16 +117,18 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
   });
   const claudeDuration = performance.now() - claudeStartTime;
   claudeSpinner.succeed(
-    `Generated review with Claude AI (${(claudeDuration / 1000).toFixed(2)}s)`
+    `Generated review with Claude AI (${model}) (${(
+      claudeDuration / 1000
+    ).toFixed(2)}s)`
   );
 
   // Extract token usage and calculate costs
   const inputTokens = message.usage.input_tokens;
   const outputTokens = message.usage.output_tokens;
 
-  // Calculate costs using pricing constants
-  const inputCost = (inputTokens / 1_000_000) * PRICING.input;
-  const outputCost = (outputTokens / 1_000_000) * PRICING.output;
+  // Calculate costs using model-specific pricing
+  const inputCost = (inputTokens / 1_000_000) * modelConfig.pricing.input;
+  const outputCost = (outputTokens / 1_000_000) * modelConfig.pricing.output;
   const totalCost = inputCost + outputCost;
 
   // Display the review
@@ -121,6 +151,7 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
   // Display timing and cost information
   const totalDuration = performance.now() - startTime;
   console.log("\n📊 Review Statistics:");
+  console.log(`   Model: ${model} (${modelConfig.id})`);
   console.log(`   GitHub API time: ${(githubDuration / 1000).toFixed(2)}s`);
   console.log(`   Claude API time: ${(claudeDuration / 1000).toFixed(2)}s`);
   console.log(`   Total time: ${(totalDuration / 1000).toFixed(2)}s`);
@@ -144,6 +175,8 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
     const saveSpinner = new Spinner("Saving review to file");
     saveSpinner.start();
     const savedFilePath = await saveReviewToFile(saveTo, prInfo, reviewText, {
+      model,
+      modelId: modelConfig.id,
       inputTokens,
       outputTokens,
       totalCost,
@@ -160,6 +193,8 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
 }
 
 interface ReviewMetadata {
+  model: ModelName;
+  modelId: string;
   inputTokens: number;
   outputTokens: number;
   totalCost: number;
@@ -197,6 +232,8 @@ pr_url: https://github.com/${prInfo.owner}/${prInfo.repo}/pull/${
     prInfo.prNumber
   }
 review_date: ${new Date().toISOString()}
+model: ${metadata.model}
+model_id: ${metadata.modelId}
 input_tokens: ${metadata.inputTokens}
 output_tokens: ${metadata.outputTokens}
 total_tokens: ${metadata.inputTokens + metadata.outputTokens}
@@ -217,6 +254,7 @@ total_time_ms: ${Math.round(metadata.totalDuration)}
 
 ## Review Metrics
 
+- **Model:** ${metadata.model} (${metadata.modelId})
 - **Input Tokens:** ${metadata.inputTokens.toLocaleString()}
 - **Output Tokens:** ${metadata.outputTokens.toLocaleString()}
 - **Total Tokens:** ${(
@@ -290,6 +328,19 @@ What the code does well (e.g., clear logic, good error handling, follows pattern
 
 ## 3. Critical Issues ONLY
 
+**🚨 CRITICAL WARNING ABOUT DIFF CONTEXT:**
+
+The diff provided shows only 3 lines of context around each change. This means:
+- You CANNOT see complete function signatures, component props, or type definitions
+- Parameters and variables may exist in the actual code but not be visible in the diff
+- **NEVER claim a variable/parameter is "undefined" or "missing" just because you don't see its definition in the diff**
+- **NEVER invent or speculate about what the full function signature looks like**
+- If you cannot see the complete context, assume the code is correct
+
+**Example:**
+- ❌ BAD: "The \`employeeName\` parameter is missing from DrawerTimeOff"
+- ✅ GOOD: Only flag if \`employeeName\` is being USED in the diff but clearly undefined
+
 **IMPORTANT: Only report issues that would cause:**
 
 - Runtime crashes or errors
@@ -299,7 +350,9 @@ What the code does well (e.g., clear logic, good error handling, follows pattern
 - Data loss or corruption
 
 Do NOT report:
-
+- Undefined variables, type errors, or scope issues (TypeScript CI validates these completely)
+- Variables/parameters you cannot see in the diff context - assume they exist
+- Do not mention or speculate about variable definitions - if the code was submitted for review, assume the build passed
 - Theoretical concerns or "what-ifs"
 - Defensive programming patterns (optional chaining + fallbacks are good)
 - Different calculations for different purposes
@@ -320,12 +373,12 @@ Skip minor style preferences.
 
 ## 5. Suggestions (Optional)
 
-Only include if there's a clear, actionable improvement that:
+ONLY include suggestions if:
+- There's a genuine logic bug
+- There's a real performance issue
+- There's missing error handling that would cause crashes
 
-- Simplifies the code
-- Improves performance
-- Fixes a real bug
-- Adds missing edge case handling
+Do NOT suggest code improvements, refactoring, or "could be clearer" changes.
 
 If nothing qualifies, skip this section.${
     reviewContext

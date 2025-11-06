@@ -20,6 +20,7 @@ async function handleReviewCommand(
     anthropicKey?: string;
     githubToken?: string;
     saveTo?: string;
+    model?: "haiku" | "sonnet";
   }
 ) {
   try {
@@ -67,6 +68,7 @@ async function handleReviewCommand(
       anthropicKey,
       githubToken,
       saveTo: options.saveTo,
+      model: options.model,
     });
   } catch (error) {
     console.error(
@@ -91,6 +93,11 @@ function configureReviewOptions(cmd: Command) {
     .option(
       "-r, --repo <owner/repo>",
       "GitHub repository (required if using PR number)"
+    )
+    .option(
+      "-m, --model <model>",
+      "AI model to use: haiku (faster, cheaper) or sonnet (more thorough, accurate)",
+      "haiku"
     )
     .option(
       "--anthropic-key <key>",
