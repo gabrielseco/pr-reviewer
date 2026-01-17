@@ -7,14 +7,21 @@ import { join } from "path";
 import { Spinner, bell } from "./spinner";
 
 // Model configuration
-type ModelName = "haiku" | "sonnet";
+type ModelName = "haiku" | "sonnet" | "opus";
+
+interface ThinkingConfig {
+  enabled: boolean;
+  budgetTokens: number;
+}
 
 interface ModelConfig {
   id: string;
   maxTokens: number;
+  thinking?: ThinkingConfig;
   pricing: {
     input: number;
     output: number;
+    thinking?: number; // Same as output for Opus
   };
 }
 
@@ -35,6 +42,19 @@ const MODELS: Record<ModelName, ModelConfig> = {
       output: 15.0,
     },
   },
+  opus: {
+    id: "claude-opus-4-5-20251101",
+    maxTokens: 16000,
+    thinking: {
+      enabled: true,
+      budgetTokens: 10000, // "think harder" level
+    },
+    pricing: {
+      input: 3.0, // per million tokens
+      output: 15.0,
+      thinking: 15.0, // Same as output
+    },
+  },
 } as const;
 
 export interface ReviewOptions {
@@ -45,6 +65,7 @@ export interface ReviewOptions {
   githubToken: string;
   saveTo?: string;
   model?: ModelName;
+  thinkingBudget?: number; // Override thinking budget for models that support it
 }
 
 export async function reviewPR(options: ReviewOptions): Promise<void> {
@@ -57,10 +78,19 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
     githubToken,
     saveTo,
     model = "haiku",
+    thinkingBudget,
   } = options;
 
   // Get model configuration
   const modelConfig = MODELS[model];
+
+  // Determine thinking configuration
+  const thinkingConfig = modelConfig.thinking
+    ? {
+        type: "enabled" as const,
+        budget_tokens: thinkingBudget || modelConfig.thinking.budgetTokens,
+      }
+    : undefined;
 
   // Load context file
   let reviewContext = "";
@@ -101,13 +131,14 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
 
   // Call Claude API with timing
   const claudeSpinner = new Spinner(
-    `Generating review with Claude AI (${model})`
+    `Generating review with Claude AI (${model}${thinkingConfig ? " + thinking" : ""})`
   );
   claudeSpinner.start();
   const claudeStartTime = performance.now();
   const message = await anthropic.messages.create({
     model: modelConfig.id,
     max_tokens: modelConfig.maxTokens,
+    ...(thinkingConfig && { thinking: thinkingConfig }),
     messages: [
       {
         role: "user",
@@ -117,7 +148,7 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
   });
   const claudeDuration = performance.now() - claudeStartTime;
   claudeSpinner.succeed(
-    `Generated review with Claude AI (${model}) (${(
+    `Generated review with Claude AI (${model}${thinkingConfig ? " + thinking" : ""}) (${(
       claudeDuration / 1000
     ).toFixed(2)}s)`
   );
@@ -126,10 +157,17 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
   const inputTokens = message.usage.input_tokens;
   const outputTokens = message.usage.output_tokens;
 
+  // For models with thinking, extract thinking tokens (if available)
+  // @ts-expect-error - thinking_tokens may not exist in all responses
+  const thinkingTokens = message.usage.thinking_tokens || 0;
+
   // Calculate costs using model-specific pricing
   const inputCost = (inputTokens / 1_000_000) * modelConfig.pricing.input;
   const outputCost = (outputTokens / 1_000_000) * modelConfig.pricing.output;
-  const totalCost = inputCost + outputCost;
+  const thinkingCost = modelConfig.pricing.thinking
+    ? (thinkingTokens / 1_000_000) * modelConfig.pricing.thinking
+    : 0;
+  const totalCost = inputCost + outputCost + thinkingCost;
 
   // Display the review
   console.log("=".repeat(80));
@@ -152,20 +190,34 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
   const totalDuration = performance.now() - startTime;
   console.log("\n📊 Review Statistics:");
   console.log(`   Model: ${model} (${modelConfig.id})`);
+  if (thinkingTokens > 0) {
+    console.log(`   Thinking: enabled (${thinkingTokens.toLocaleString()} tokens)`);
+  }
   console.log(`   GitHub API time: ${(githubDuration / 1000).toFixed(2)}s`);
   console.log(`   Claude API time: ${(claudeDuration / 1000).toFixed(2)}s`);
   console.log(`   Total time: ${(totalDuration / 1000).toFixed(2)}s`);
   console.log(`\n💰 Token Usage & Cost:`);
   console.log(`   Input tokens: ${inputTokens.toLocaleString()}`);
   console.log(`   Output tokens: ${outputTokens.toLocaleString()}`);
+  if (thinkingTokens > 0) {
+    console.log(`   Thinking tokens: ${thinkingTokens.toLocaleString()}`);
+  }
   console.log(
-    `   Total tokens: ${(inputTokens + outputTokens).toLocaleString()}`
+    `   Total tokens: ${(inputTokens + outputTokens + thinkingTokens).toLocaleString()}`
   );
-  console.log(
-    `   Cost: $${totalCost.toFixed(4)} ($${inputCost.toFixed(
-      4
-    )} input + $${outputCost.toFixed(4)} output)`
-  );
+  if (thinkingTokens > 0) {
+    console.log(
+      `   Cost: $${totalCost.toFixed(4)} ($${inputCost.toFixed(
+        4
+      )} input + $${outputCost.toFixed(4)} output + $${thinkingCost.toFixed(4)} thinking)`
+    );
+  } else {
+    console.log(
+      `   Cost: $${totalCost.toFixed(4)} ($${inputCost.toFixed(
+        4
+      )} input + $${outputCost.toFixed(4)} output)`
+    );
+  }
   console.log(
     `\n🔗 Review URL: https://github.com/${prInfo.owner}/${prInfo.repo}/pull/${prInfo.prNumber}`
   );
@@ -179,6 +231,7 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
       modelId: modelConfig.id,
       inputTokens,
       outputTokens,
+      thinkingTokens,
       totalCost,
       githubDuration,
       claudeDuration,
@@ -197,6 +250,7 @@ interface ReviewMetadata {
   modelId: string;
   inputTokens: number;
   outputTokens: number;
+  thinkingTokens: number;
   totalCost: number;
   githubDuration: number;
   claudeDuration: number;
@@ -224,6 +278,7 @@ async function saveReviewToFile(
   const filePath = join(savePath, filename);
 
   // Create markdown content with metadata
+  const totalTokens = metadata.inputTokens + metadata.outputTokens + metadata.thinkingTokens;
   const markdown = `---
 title: "PR Review: ${prInfo.title}"
 repository: ${prInfo.owner}/${prInfo.repo}
@@ -235,8 +290,13 @@ review_date: ${new Date().toISOString()}
 model: ${metadata.model}
 model_id: ${metadata.modelId}
 input_tokens: ${metadata.inputTokens}
-output_tokens: ${metadata.outputTokens}
-total_tokens: ${metadata.inputTokens + metadata.outputTokens}
+output_tokens: ${metadata.outputTokens}${
+    metadata.thinkingTokens > 0
+      ? `
+thinking_tokens: ${metadata.thinkingTokens}`
+      : ""
+  }
+total_tokens: ${totalTokens}
 cost_usd: ${metadata.totalCost.toFixed(4)}
 github_api_time_ms: ${Math.round(metadata.githubDuration)}
 claude_api_time_ms: ${Math.round(metadata.claudeDuration)}
@@ -254,12 +314,20 @@ total_time_ms: ${Math.round(metadata.totalDuration)}
 
 ## Review Metrics
 
-- **Model:** ${metadata.model} (${metadata.modelId})
+- **Model:** ${metadata.model} (${metadata.modelId})${
+    metadata.thinkingTokens > 0
+      ? `
+- **Thinking:** enabled (${metadata.thinkingTokens.toLocaleString()} tokens)`
+      : ""
+  }
 - **Input Tokens:** ${metadata.inputTokens.toLocaleString()}
-- **Output Tokens:** ${metadata.outputTokens.toLocaleString()}
-- **Total Tokens:** ${(
-    metadata.inputTokens + metadata.outputTokens
-  ).toLocaleString()}
+- **Output Tokens:** ${metadata.outputTokens.toLocaleString()}${
+    metadata.thinkingTokens > 0
+      ? `
+- **Thinking Tokens:** ${metadata.thinkingTokens.toLocaleString()}`
+      : ""
+  }
+- **Total Tokens:** ${totalTokens.toLocaleString()}
 - **Cost:** $${metadata.totalCost.toFixed(4)}
 - **GitHub API Time:** ${(metadata.githubDuration / 1000).toFixed(2)}s
 - **Claude API Time:** ${(metadata.claudeDuration / 1000).toFixed(2)}s

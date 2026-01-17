@@ -1,6 +1,6 @@
 import { existsSync } from 'fs';
 import { homedir } from 'os';
-import { join } from 'path';
+import { join, dirname, isAbsolute, resolve } from 'path';
 
 export interface Config {
   defaultGuidelines?: string;
@@ -78,7 +78,26 @@ export function extractRepoFromUrl(url: string): string | undefined {
 }
 
 /**
- * Get guidelines path for a specific repo, falling back to defaults
+ * Resolve a guideline path relative to the config file location.
+ * If the path is absolute, return it as-is.
+ * If relative, resolve it relative to the config file's directory.
+ */
+function resolveGuidelinePath(guidelinePath: string): string {
+  if (isAbsolute(guidelinePath)) {
+    return guidelinePath;
+  }
+
+  // Get the directory containing the config file
+  const configPath = getConfigPath();
+  const configDir = dirname(configPath);
+
+  // Resolve the guideline path relative to the config directory
+  return resolve(configDir, guidelinePath);
+}
+
+/**
+ * Get guidelines path for a specific repo, falling back to defaults.
+ * Paths are resolved relative to the config file location.
  */
 export async function getGuidelinesForRepo(repoOrUrl: string, config?: Config): Promise<string | undefined> {
   const cfg = config || await loadConfig();
@@ -88,11 +107,15 @@ export async function getGuidelinesForRepo(repoOrUrl: string, config?: Config): 
 
   // Check repo-specific guidelines
   if (cfg.repoGuidelines && cfg.repoGuidelines[repo]) {
-    return cfg.repoGuidelines[repo];
+    return resolveGuidelinePath(cfg.repoGuidelines[repo]);
   }
 
   // Fall back to default guidelines
-  return cfg.defaultGuidelines;
+  if (cfg.defaultGuidelines) {
+    return resolveGuidelinePath(cfg.defaultGuidelines);
+  }
+
+  return undefined;
 }
 
 /**

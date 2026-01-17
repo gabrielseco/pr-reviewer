@@ -20,7 +20,8 @@ async function handleReviewCommand(
     anthropicKey?: string;
     githubToken?: string;
     saveTo?: string;
-    model?: "haiku" | "sonnet";
+    model?: "haiku" | "sonnet" | "opus";
+    thinkingBudget?: number;
   }
 ) {
   try {
@@ -69,6 +70,7 @@ async function handleReviewCommand(
       githubToken,
       saveTo: options.saveTo,
       model: options.model,
+      thinkingBudget: options.thinkingBudget,
     });
   } catch (error) {
     console.error(
@@ -96,8 +98,13 @@ function configureReviewOptions(cmd: Command) {
     )
     .option(
       "-m, --model <model>",
-      "AI model to use: haiku (faster, cheaper) or sonnet (more thorough, accurate)",
+      "AI model to use: haiku (fast, cheap), sonnet (balanced), or opus (most capable, extended thinking)",
       "haiku"
+    )
+    .option(
+      "--thinking-budget <tokens>",
+      "Thinking token budget for opus model (default: 10000)",
+      parseInt
     )
     .option(
       "--anthropic-key <key>",
