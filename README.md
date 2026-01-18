@@ -7,6 +7,8 @@ An AI-powered GitHub Pull Request reviewer using Anthropic's Claude API. This CL
 - Review any GitHub PR using Claude AI
 - **Interactive mode** - Just run the tool without arguments and it will guide you through the process
 - **Configuration file** - Auto-detect guidelines based on repository
+- **Model selection** - Choose between Haiku (fast, cheap), Sonnet (balanced), or Opus (most capable with extended thinking)
+- **Confidence scoring** - Every issue includes a confidence score (0-100) to reduce false positives
 - Provide custom review context via markdown files
 - Configurable coding standards and architectural guidelines
 - Detailed analysis of code quality, security, and best practices
@@ -191,17 +193,76 @@ Example `review-context.md`:
 
 An example file is provided at `review-context.md`.
 
+## Confidence Scoring
+
+To reduce false positives, the tool requires Claude to include a confidence score (0-100) for every issue it reports. This helps you focus on the most likely problems first.
+
+### Confidence Levels
+
+- **90-100:** Critical bug, security flaw, or data loss (will crash or corrupt)
+- **70-89:** Likely issue worth addressing (logic error, performance problem)
+- **50-69:** Possible concern, needs human judgment (minor code smell)
+- **Below 50:** Not reported
+
+### Using Confidence Scores
+
+By default, only issues with confidence ≥ 70 are shown. You can adjust this threshold:
+
+```bash
+# Show only high-confidence issues (85+)
+bun run src/index.ts https://github.com/owner/repo/pull/123 --min-confidence 85
+
+# Show all issues including lower confidence ones (60+)
+bun run src/index.ts https://github.com/owner/repo/pull/123 --min-confidence 60
+
+# Use with opus model for most accurate confidence scoring
+bun run src/index.ts https://github.com/owner/repo/pull/123 --model opus --min-confidence 75
+```
+
+### Example Issue Format
+
+Each issue in the review will include its confidence score:
+
+```markdown
+**[CONFIDENCE: 95] Line 42:** SQL injection vulnerability - user input is concatenated directly into query
+**[CONFIDENCE: 80] Line 108:** Potential null pointer dereference when user object is undefined
+**[CONFIDENCE: 72] Line 203:** N+1 query pattern could cause performance issues at scale
+```
+
+## Model Selection
+
+Choose the right model for your needs:
+
+- **haiku** (default): Fast and cheap ($0.003-0.01 per review), good for quick checks
+- **sonnet**: Balanced performance ($0.04-0.15 per review), better at catching subtle issues
+- **opus**: Most capable with extended thinking ($0.10-0.90 per review), best for critical reviews
+
+```bash
+# Quick review with Haiku (default)
+bun run src/index.ts https://github.com/owner/repo/pull/123
+
+# Better quality with Sonnet
+bun run src/index.ts https://github.com/owner/repo/pull/123 --model sonnet
+
+# Deep review with Opus + extended thinking
+bun run src/index.ts https://github.com/owner/repo/pull/123 --model opus
+```
+
 ## Options
 
 ```
 review <pr-url-or-number>     Review a GitHub pull request
 
 Options:
-  -c, --context <path>        Path to markdown file with review context (default: "./review-context.md")
-  -r, --repo <owner/repo>     GitHub repository (required if using PR number)
-  --anthropic-key <key>       Anthropic API key (or set ANTHROPIC_API_KEY env var)
-  --github-token <token>      GitHub token (or set GITHUB_PRD_TOKEN env var)
-  -h, --help                  Display help for command
+  -c, --context <path>          Path to markdown file with review context
+  -r, --repo <owner/repo>       GitHub repository (required if using PR number)
+  -m, --model <model>           AI model: haiku (fast, cheap), sonnet (balanced), or opus (most capable) (default: "haiku")
+  -s, --save-to <path>          Path to save review as markdown file
+  --thinking-budget <tokens>    Thinking token budget for opus model (default: 10000)
+  --min-confidence <score>      Minimum confidence score to display issues (0-100, default: 70)
+  --anthropic-key <key>         Anthropic API key (or set ANTHROPIC_API_KEY env var)
+  --github-token <token>        GitHub token (or set GITHUB_PRD_TOKEN env var)
+  -h, --help                    Display help for command
 ```
 
 ## Example Output

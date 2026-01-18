@@ -66,6 +66,7 @@ export interface ReviewOptions {
   saveTo?: string;
   model?: ModelName;
   thinkingBudget?: number; // Override thinking budget for models that support it
+  minConfidence?: number; // Minimum confidence score to display (0-100, default: 70)
 }
 
 export async function reviewPR(options: ReviewOptions): Promise<void> {
@@ -79,6 +80,7 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
     saveTo,
     model = "haiku",
     thinkingBudget,
+    minConfidence = 70,
   } = options;
 
   // Get model configuration
@@ -127,7 +129,7 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
   const anthropic = new Anthropic({ apiKey: anthropicKey });
 
   // Build the review prompt
-  const prompt = buildReviewPrompt(prInfo, reviewContext);
+  const prompt = buildReviewPrompt(prInfo, reviewContext, minConfidence);
 
   // Call Claude API with timing
   const claudeSpinner = new Spinner(
@@ -193,6 +195,7 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
   if (thinkingTokens > 0) {
     console.log(`   Thinking: enabled (${thinkingTokens.toLocaleString()} tokens)`);
   }
+  console.log(`   Confidence threshold: ${minConfidence}% (only showing issues ≥${minConfidence})`);
   console.log(`   GitHub API time: ${(githubDuration / 1000).toFixed(2)}s`);
   console.log(`   Claude API time: ${(claudeDuration / 1000).toFixed(2)}s`);
   console.log(`   Total time: ${(totalDuration / 1000).toFixed(2)}s`);
@@ -236,6 +239,7 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
       githubDuration,
       claudeDuration,
       totalDuration,
+      minConfidence,
     });
     saveSpinner.succeed(`Review saved to: ${savedFilePath}`);
   }
@@ -255,6 +259,7 @@ interface ReviewMetadata {
   githubDuration: number;
   claudeDuration: number;
   totalDuration: number;
+  minConfidence: number;
 }
 
 async function saveReviewToFile(
@@ -289,6 +294,7 @@ pr_url: https://github.com/${prInfo.owner}/${prInfo.repo}/pull/${
 review_date: ${new Date().toISOString()}
 model: ${metadata.model}
 model_id: ${metadata.modelId}
+min_confidence: ${metadata.minConfidence}
 input_tokens: ${metadata.inputTokens}
 output_tokens: ${metadata.outputTokens}${
     metadata.thinkingTokens > 0
@@ -320,6 +326,7 @@ total_time_ms: ${Math.round(metadata.totalDuration)}
 - **Thinking:** enabled (${metadata.thinkingTokens.toLocaleString()} tokens)`
       : ""
   }
+- **Confidence Threshold:** ${metadata.minConfidence}% (only showing issues ≥${metadata.minConfidence})
 - **Input Tokens:** ${metadata.inputTokens.toLocaleString()}
 - **Output Tokens:** ${metadata.outputTokens.toLocaleString()}${
     metadata.thinkingTokens > 0
@@ -344,7 +351,7 @@ ${reviewContent}
   return filePath;
 }
 
-function buildReviewPrompt(prInfo: PRInfo, reviewContext: string): string {
+function buildReviewPrompt(prInfo: PRInfo, reviewContext: string, minConfidence: number): string {
   const filesInfo = prInfo.files
     .map(
       (f) => `- ${f.filename} (${f.status}, +${f.additions}/-${f.deletions})`
@@ -385,6 +392,24 @@ ${reviewContext}
   prompt += `# Code Review Instructions
 
 Please provide a code review with the following sections:
+
+## Confidence Scoring
+
+For EVERY issue you report, you MUST include a confidence score (0-100) using this format:
+
+**[CONFIDENCE: 95] Line 42:** Description of the issue
+
+**Confidence Score Guidelines:**
+- **90-100:** Critical bug, security flaw, or data loss (will crash or corrupt)
+- **70-89:** Likely issue worth addressing (logic error, performance problem)
+- **50-69:** Possible concern, needs human judgment (minor code smell)
+- **Below 50:** Don't report
+
+**IMPORTANT:**
+- **ONLY report issues with confidence ≥ ${minConfidence}**
+- If you're unsure due to limited diff context, DO NOT report it
+- Every issue MUST start with [CONFIDENCE: XX] format
+- Be honest about uncertainty - don't inflate confidence scores
 
 ## 1. Summary
 

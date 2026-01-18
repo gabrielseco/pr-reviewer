@@ -22,6 +22,7 @@ async function handleReviewCommand(
     saveTo?: string;
     model?: "haiku" | "sonnet" | "opus";
     thinkingBudget?: number;
+    minConfidence?: number;
   }
 ) {
   try {
@@ -71,6 +72,7 @@ async function handleReviewCommand(
       saveTo: options.saveTo,
       model: options.model,
       thinkingBudget: options.thinkingBudget,
+      minConfidence: options.minConfidence,
     });
   } catch (error) {
     console.error(
@@ -104,6 +106,11 @@ function configureReviewOptions(cmd: Command) {
     .option(
       "--thinking-budget <tokens>",
       "Thinking token budget for opus model (default: 10000)",
+      parseInt
+    )
+    .option(
+      "--min-confidence <score>",
+      "Minimum confidence score to display issues (0-100, default: 70)",
       parseInt
     )
     .option(
