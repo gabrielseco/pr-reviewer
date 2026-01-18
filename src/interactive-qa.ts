@@ -16,7 +16,7 @@ interface QAOptions {
  * Start interactive Q&A session after review
  */
 export async function startInteractiveQA(options: QAOptions): Promise<void> {
-  const { anthropic, modelId, prInfo, reviewContext, conversationHistory, minConfidence } =
+  const { anthropic, modelId, conversationHistory } =
     options;
 
   console.log("\n" + "=".repeat(80));
@@ -73,7 +73,7 @@ export async function startInteractiveQA(options: QAOptions): Promise<void> {
         messages,
       });
 
-      spinner.stop();
+      spinner.succeed("Got response");
 
       // Extract text response
       const textContent = response.content.find((block) => block.type === "text");
@@ -92,7 +92,7 @@ export async function startInteractiveQA(options: QAOptions): Promise<void> {
         content: response.content,
       });
     } catch (error) {
-      spinner.stop();
+      spinner.fail("Failed to get response");
       console.error(
         `\n❌ Error: ${error instanceof Error ? error.message : "Unknown error"}\n`
       );
