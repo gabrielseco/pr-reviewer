@@ -28,6 +28,8 @@ async function handleReviewCommand(
     maxTurns?: number;
     showTools?: boolean;
     repoPath?: string;
+    multiAgent?: boolean;
+    agents?: string;
   }
 ) {
   try {
@@ -83,6 +85,8 @@ async function handleReviewCommand(
       maxTurns: options.maxTurns,
       showTools: options.showTools,
       repoPath: options.repoPath,
+      multiAgent: options.multiAgent,
+      agents: options.agents ? options.agents.split(",").map(a => a.trim()) : undefined,
     });
   } catch (error) {
     console.error(
@@ -173,6 +177,14 @@ function configureReviewOptions(cmd: Command) {
     .option(
       "--repo-path <path>",
       "Local repository path for tool execution (defaults to current working directory)"
+    )
+    .option(
+      "--multi-agent",
+      "Enable multi-agent review mode with specialized agents"
+    )
+    .option(
+      "--agents <list>",
+      "Comma-separated list of agents to use (security,logic,performance,style)"
     );
 }
 

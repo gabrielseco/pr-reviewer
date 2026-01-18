@@ -6,6 +6,7 @@ An AI-powered GitHub Pull Request reviewer using Anthropic's Claude API. This CL
 
 - Review any GitHub PR using Claude AI
 - **Interactive mode** - Just run the tool without arguments and it will guide you through the process
+- **Multi-agent mode** - Run specialized agents in parallel for comprehensive coverage (security, logic, performance, style)
 - **Agentic mode** - Enable Claude to explore your codebase using tools for deeper analysis
 - **Configuration file** - Auto-detect guidelines based on repository
 - **Model selection** - Choose between Haiku (fast, cheap), Sonnet (balanced), or Opus (most capable with extended thinking)
@@ -239,10 +240,10 @@ Not all PRs need the same level of scrutiny. Here's a quick guide to help you ch
 | **Simple bug fix** | `bun run src/index.ts <PR> --model haiku` | ~$0.01 | Fast, cheap, sufficient for obvious fixes |
 | **Documentation** | `bun run src/index.ts <PR> --model haiku` | ~$0.01 | No need for deep analysis |
 | **Refactoring** | `bun run src/index.ts <PR> --model sonnet` | ~$0.10 | Better at catching subtle logic issues |
-| **New features** | `bun run src/index.ts <PR> --model sonnet --agentic` | ~$0.15 | Explores dependencies and usage patterns |
-| **Security changes** | `bun run src/index.ts <PR> --model opus --agentic` | ~$0.50 | Most thorough, reads full context |
+| **New features** | `bun run src/index.ts <PR> --multi-agent` | ~$0.11 | Comprehensive review from multiple angles |
+| **Security changes** | `bun run src/index.ts <PR> --multi-agent --agents security,logic` | ~$0.08 | Focused security + logic review |
 | **Breaking changes** | `bun run src/index.ts <PR> --model opus --agentic` | ~$0.50 | Finds all affected code |
-| **Critical/production** | `bun run src/index.ts <PR> --model opus --agentic --min-confidence 85` | ~$0.50 | Maximum accuracy, high confidence threshold |
+| **Critical/production** | `bun run src/index.ts <PR> --multi-agent --min-confidence 85` | ~$0.11 | Comprehensive coverage, high confidence |
 
 ### Quick Decision Guide
 
@@ -346,6 +347,66 @@ bun run src/index.ts review https://github.com/owner/repo/pull/123 \
 - Complex logic changes
 
 **Note:** Agentic mode costs ~40% more due to multiple API calls and requires a local repository clone.
+
+## Multi-Agent Review Mode
+
+Run multiple specialized agents in parallel, each focused on a specific aspect of code review. This reduces false positives and provides comprehensive coverage across security, logic, performance, and code quality.
+
+```bash
+# Run all agents (security, logic, performance, style)
+bun run src/index.ts https://github.com/owner/repo/pull/123 --multi-agent
+
+# Run specific agents only
+bun run src/index.ts https://github.com/owner/repo/pull/123 --multi-agent --agents security,logic
+
+# Adjust confidence threshold
+bun run src/index.ts https://github.com/owner/repo/pull/123 --multi-agent --min-confidence 80
+```
+
+### Available Agents
+
+- **SecurityAgent** (Opus model) - Security vulnerabilities, injection attacks, authentication issues
+- **LogicAgent** (Sonnet model) - Business logic errors, edge cases, correctness
+- **PerformanceAgent** (Haiku model) - Performance issues, N+1 queries, memory leaks
+- **StyleAgent** (Haiku model) - Code quality, patterns, best practices
+
+### Benefits
+
+1. **Better coverage** - Multiple perspectives find different issues
+2. **Fewer false positives** - Narrow focus reduces noise
+3. **Flexible cost control** - Mix models (Opus for security, Haiku for style)
+4. **Fast execution** - All agents run in parallel (5-10 seconds total)
+5. **Specialized expertise** - Each agent focuses on what it does best
+
+### Cost Analysis
+
+For a medium PR (~300 lines):
+- **Single Haiku review**: ~$0.007
+- **Single Sonnet review**: ~$0.08
+- **Single Opus review**: ~$0.23
+- **Multi-Agent (mixed models)**: ~$0.11
+
+The multi-agent approach provides Opus-level security review + comprehensive coverage at half the cost of a full Opus review.
+
+### When to Use
+
+**Use multi-agent mode for:**
+- Production deployments
+- Security-sensitive changes
+- Large feature PRs
+- Code you want thoroughly reviewed from multiple angles
+
+**Use specific agents when:**
+```bash
+# Security-focused PR
+bun run src/index.ts <PR> --multi-agent --agents security,logic
+
+# Performance optimization PR
+bun run src/index.ts <PR> --multi-agent --agents performance
+
+# Refactoring/code quality PR
+bun run src/index.ts <PR> --multi-agent --agents logic,style
+```
 
 For full details, see [AGENTIC_MODE.md](./AGENTIC_MODE.md).
 

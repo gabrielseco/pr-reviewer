@@ -394,7 +394,7 @@ _(Implementation details removed - see Agentic Review section for superior appro
 #### 5. Agentic Review with Tool Use ⭐⭐⭐⭐⭐
 **Effort:** 1 week
 **Impact:** Game-changing - Agent can explore and reason
-**Cost:** ~$0.35 per medium PR (40% increase, massive value)
+**Cost:** ~$0.35 per medium PR (40% increase, massive value)xº
 
 **What it enables:**
 - Agent can read files to understand context

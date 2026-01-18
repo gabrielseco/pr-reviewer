@@ -8,57 +8,8 @@ import { Spinner, bell } from "./spinner";
 import { startInteractiveQA } from "./interactive-qa";
 import { agenticReviewPR } from "./agentic/agentic-reviewer";
 import type { AgenticReviewOptions } from "./agentic/types";
-
-// Model configuration
-type ModelName = "haiku" | "sonnet" | "opus";
-
-interface ThinkingConfig {
-  enabled: boolean;
-  budgetTokens: number;
-}
-
-interface ModelConfig {
-  id: string;
-  maxTokens: number;
-  thinking?: ThinkingConfig;
-  pricing: {
-    input: number;
-    output: number;
-    thinking?: number; // Same as output for Opus
-  };
-}
-
-const MODELS: Record<ModelName, ModelConfig> = {
-  haiku: {
-    id: "claude-haiku-4-5-20251001",
-    maxTokens: 4000,
-    pricing: {
-      input: 0.25, // per million tokens
-      output: 1.25,
-    },
-  },
-  sonnet: {
-    id: "claude-sonnet-4-5-20250929",
-    maxTokens: 4000,
-    pricing: {
-      input: 3.0, // per million tokens
-      output: 15.0,
-    },
-  },
-  opus: {
-    id: "claude-opus-4-5-20251101",
-    maxTokens: 16000,
-    thinking: {
-      enabled: true,
-      budgetTokens: 10000, // "think harder" level
-    },
-    pricing: {
-      input: 3.0, // per million tokens
-      output: 15.0,
-      thinking: 15.0, // Same as output
-    },
-  },
-} as const;
+import { MODELS, type ModelName } from "./models.js";
+import { multiAgentReview, type MultiAgentOptions } from "./multi-agent-reviewer.js";
 
 export interface ReviewOptions {
   prUrlOrNumber: string;
@@ -75,6 +26,8 @@ export interface ReviewOptions {
   maxTurns?: number; // Maximum number of agentic turns
   showTools?: boolean; // Display tool usage during review
   repoPath?: string; // Local repository path for tool execution
+  multiAgent?: boolean; // Enable multi-agent review mode
+  agents?: string[]; // Specific agents to use (default: all)
 }
 
 export async function reviewPR(options: ReviewOptions): Promise<void> {
@@ -94,6 +47,8 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
     maxTurns = 10,
     showTools = false,
     repoPath = process.cwd(),
+    multiAgent = false,
+    agents,
   } = options;
 
   // Get model configuration
@@ -150,8 +105,82 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
   let turnCount: number = 1;
   let claudeDuration: number = 0;
 
-  // Check if agentic mode is enabled
-  if (agentic) {
+  // Check if multi-agent mode is enabled
+  if (multiAgent) {
+    // Multi-agent mode with parallel execution
+    const multiAgentOptions: MultiAgentOptions = {
+      agents,
+      minConfidence,
+      parallelExecution: true,
+    };
+
+    const claudeSpinner = new Spinner(
+      `Running multi-agent review (${agents?.join(", ") || "all agents"})`
+    );
+    claudeSpinner.start();
+    const claudeStartTime = performance.now();
+
+    const result = await multiAgentReview(
+      prInfo,
+      reviewContext,
+      anthropic,
+      multiAgentOptions
+    );
+
+    claudeDuration = performance.now() - claudeStartTime;
+    claudeSpinner.succeed(
+      `Completed multi-agent review (${(claudeDuration / 1000).toFixed(2)}s)`
+    );
+
+    // Display agent timing
+    console.log("\n📊 Agent Performance:");
+    for (const [agentName, duration] of Object.entries(result.timing.perAgent)) {
+      const agentReview = result.agentReviews.find((r) => r.agentName === agentName);
+      const issueCount = agentReview?.issues.length || 0;
+      console.log(
+        `   ${agentName}: ${(duration / 1000).toFixed(2)}s (${issueCount} issues found)`
+      );
+    }
+
+    // Build review text from multi-agent results
+    reviewText = result.summary + "\n\n";
+
+    // Group issues by severity
+    const criticalIssues = result.issues.filter((i) => i.severity === "critical");
+    const highIssues = result.issues.filter((i) => i.severity === "high");
+    const mediumIssues = result.issues.filter((i) => i.severity === "medium");
+    const lowIssues = result.issues.filter((i) => i.severity === "low");
+
+    const formatIssues = (issues: typeof result.issues, title: string) => {
+      if (issues.length === 0) return "";
+      let text = `## ${title}\n\n`;
+      for (const issue of issues) {
+        text += `**[CONFIDENCE: ${issue.confidence}]** ${issue.line ? `Line ${issue.line}:` : ""} ${issue.message}\n\n`;
+      }
+      return text;
+    };
+
+    reviewText += formatIssues(criticalIssues, "Critical Issues");
+    reviewText += formatIssues(highIssues, "High Priority Issues");
+    reviewText += formatIssues(mediumIssues, "Medium Priority Issues");
+    reviewText += formatIssues(lowIssues, "Low Priority Issues");
+
+    // Calculate token usage from all agents
+    inputTokens = result.agentReviews.reduce((sum, r) => sum + r.usage.inputTokens, 0);
+    outputTokens = result.agentReviews.reduce((sum, r) => sum + r.usage.outputTokens, 0);
+
+    // Build conversation history for interactive mode
+    conversationHistory = [
+      {
+        role: "user",
+        content: `Multi-agent review of PR: ${prInfo.title}`,
+      },
+      {
+        role: "assistant",
+        content: reviewText,
+      },
+    ];
+  } else if (agentic) {
     // Agentic mode with tool use
     const agenticOptions: AgenticReviewOptions = {
       maxTurns,
@@ -298,7 +327,11 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
   // Display timing and cost information
   const totalDuration = performance.now() - startTime;
   console.log("\n📊 Review Statistics:");
-  console.log(`   Model: ${model} (${modelConfig.id})`);
+  if (multiAgent) {
+    console.log(`   Mode: multi-agent (${agents?.join(", ") || "all agents"})`);
+  } else {
+    console.log(`   Model: ${model} (${modelConfig.id})`);
+  }
   if (agentic) {
     console.log(`   Mode: agentic (${turnCount} turns)`);
   }
