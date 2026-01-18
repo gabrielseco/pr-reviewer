@@ -106,12 +106,24 @@ function configureReviewOptions(cmd: Command) {
     .option(
       "--thinking-budget <tokens>",
       "Thinking token budget for opus model (default: 10000)",
-      parseInt
+      (value) => {
+        const parsed = parseInt(value, 10);
+        if (isNaN(parsed) || parsed < 0 || parsed > 100) {
+          throw new Error("thinking-budget must be a number between 0 and 100");
+        }
+        return parsed;
+      }
     )
     .option(
       "--min-confidence <score>",
       "Minimum confidence score to display issues (0-100, default: 70)",
-      parseInt
+      (value) => {
+        const parsed = parseInt(value, 10);
+        if (isNaN(parsed) || parsed < 0 || parsed > 100) {
+          throw new Error("min-confidence must be a number between 0 and 100");
+        }
+        return parsed;
+      }
     )
     .option(
       "--anthropic-key <key>",
