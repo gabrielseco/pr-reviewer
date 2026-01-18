@@ -3,6 +3,10 @@ import { Command } from "commander";
 import { reviewPR } from "./reviewer";
 import { runInteractive } from "./interactive";
 import { loadConfig, getGuidelinesForRepo } from "./config";
+import { fetchPRInfo } from "./github";
+import { analyzePR } from "./pr-analyzer";
+import { generateRecommendations } from "./recommendation-engine";
+import { promptUserSelection } from "./interactive-suggester";
 
 const program = new Command();
 
@@ -187,6 +191,130 @@ function configureReviewOptions(cmd: Command) {
       "Comma-separated list of agents to use (security,logic,performance,style)"
     );
 }
+
+// Handler for 'suggest' command
+async function handleSuggestCommand(
+  prUrlOrNumber: string | undefined,
+  options: {
+    repo?: string;
+    githubToken?: string;
+    anthropicKey?: string;
+    context?: string;
+    saveTo?: string;
+    repoPath?: string;
+  }
+) {
+  try {
+    // If no PR URL provided, run interactive mode
+    if (!prUrlOrNumber) {
+      const interactive = await runInteractive();
+      prUrlOrNumber = interactive.prUrlOrNumber;
+      options.repo = options.repo || interactive.repo;
+    }
+
+    const githubToken = options.githubToken || process.env.GITHUB_PRD_TOKEN;
+
+    if (!githubToken) {
+      console.error(
+        "Error: GitHub token is required. Set GITHUB_PRD_TOKEN env var or use --github-token"
+      );
+      process.exit(1);
+    }
+
+    // Fetch PR information
+    console.log("🔍 Analyzing PR...\n");
+    const prInfo = await fetchPRInfo(prUrlOrNumber, options.repo, githubToken);
+
+    // Analyze the PR
+    const analysis = analyzePR(prInfo);
+
+    // Generate recommendations
+    const recommendations = generateRecommendations(analysis);
+
+    // Show interactive prompt and get user selection
+    const selectedOption = await promptUserSelection(recommendations, analysis);
+
+    if (!selectedOption) {
+      // User cancelled
+      return;
+    }
+
+    console.log(`\n▶️  Starting review with: ${selectedOption.name}\n`);
+
+    // Parse the command string to extract options
+    const commandParts = selectedOption.command.split(' ');
+    const reviewOptions: any = {
+      repo: options.repo,
+      context: options.context,
+      saveTo: options.saveTo,
+      repoPath: options.repoPath,
+    };
+
+    // Parse command flags
+    for (let i = 0; i < commandParts.length; i++) {
+      const part = commandParts[i];
+
+      if (part === '--multi-agent') {
+        reviewOptions.multiAgent = true;
+      } else if (part === '--agentic') {
+        reviewOptions.agentic = true;
+      } else if (part === '--model') {
+        reviewOptions.model = commandParts[++i];
+      } else if (part === '--agents') {
+        reviewOptions.agents = commandParts[++i];
+      } else if (part === '--min-confidence') {
+        reviewOptions.minConfidence = parseInt(commandParts[++i] || '0');
+      } else if (part === '--max-turns') {
+        reviewOptions.maxTurns = parseInt(commandParts[++i] || '10');
+      } else if (part === '--show-tools') {
+        reviewOptions.showTools = true;
+      }
+    }
+
+    // Execute the review with parsed options
+    await handleReviewCommand(prUrlOrNumber, reviewOptions);
+  } catch (error) {
+    console.error(
+      "Error:",
+      error instanceof Error ? error.message : String(error)
+    );
+    process.exit(1);
+  }
+}
+
+// Register the 'suggest' command
+program
+  .command("suggest")
+  .description("Analyze PR and suggest the best review mode")
+  .argument(
+    "[pr-url-or-number]",
+    "GitHub PR URL or PR number (omit for interactive mode)"
+  )
+  .option(
+    "-r, --repo <owner/repo>",
+    "GitHub repository (required if using PR number)"
+  )
+  .option(
+    "--github-token <token>",
+    "GitHub token (or set GITHUB_PRD_TOKEN env var)"
+  )
+  .option(
+    "--anthropic-key <key>",
+    "Anthropic API key (or set ANTHROPIC_API_KEY env var)"
+  )
+  .option(
+    "-c, --context <path>",
+    "Path to markdown file with review context/guidelines"
+  )
+  .option(
+    "-s, --save-to <path>",
+    "Path to save review as markdown file"
+  )
+  .option(
+    "--repo-path <path>",
+    "Local repository path for tool execution"
+  )
+  .action(handleSuggestCommand);
 
 // Register the 'review' command
 configureReviewOptions(

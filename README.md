@@ -5,6 +5,7 @@ An AI-powered GitHub Pull Request reviewer using Anthropic's Claude API. This CL
 ## Features
 
 - Review any GitHub PR using Claude AI
+- **Smart command suggestion** - Analyzes your PR and recommends the optimal review strategy with cost/time/accuracy tradeoffs
 - **Interactive mode** - Just run the tool without arguments and it will guide you through the process
 - **Multi-agent mode** - Run specialized agents in parallel for comprehensive coverage (security, logic, performance, style)
 - **Agentic mode** - Enable Claude to explore your codebase using tools for deeper analysis
@@ -59,6 +60,75 @@ The interactive mode will:
 2. Auto-detect the repository
 3. Show available guideline options (from config or custom)
 4. Optionally save your preferences for future use
+
+### Smart Command Suggestion (Recommended!)
+
+Let the tool analyze your PR and suggest the best review strategy:
+
+```bash
+bun run src/index.ts suggest https://github.com/owner/repo/pull/123
+```
+
+or with PR number:
+
+```bash
+bun run src/index.ts suggest 123 --repo owner/repo
+```
+
+The suggest command will:
+
+1. **Analyze the PR** - Examines files changed, lines modified, keywords in title/description, and modified paths
+2. **Detect concerns** - Identifies security, authentication, database, breaking changes, performance, or refactoring patterns
+3. **Recommend review modes** - Suggests the optimal review strategy based on complexity and risk
+4. **Show alternatives** - Presents multiple options with cost, time, and accuracy estimates
+5. **Interactive selection** - Lets you choose your preferred mode or use the recommended one
+6. **Execute review** - Automatically runs the review with your chosen configuration
+
+**Example output:**
+
+```
+📊 PR Analysis Results
+
+  8 files changed | +450 -120 | Security, Auth related
+  Complexity: medium | Risk: high
+  Detected: 🔒 Security, 🔐 Authentication
+
+🎯 Recommended Review Mode:
+
+  ✨ Security-Focused Deep Review (Recommended)
+     Security and logic agents with codebase exploration
+     💰 ~$0.30-0.40 | ⏱️  ~45s | 🎯 95% accuracy
+     📝 Changes involve authentication and security - requires verification
+     💻 Command: bun run src/index.ts <PR> --multi-agent --agentic --agents security,logic
+
+📋 Alternative Options:
+
+  1. Fast Security Review
+     Parallel security and logic review without deep exploration
+     💰 ~$0.08-0.11 | ⏱️  ~8s | 🎯 85% accuracy
+     📝 Good balance for security-related changes from trusted authors
+
+  2. Quick Review
+     Fast, cost-effective single-pass review
+     💰 ~$0.01 | ⏱️  ~3s | 🎯 70% accuracy
+     📝 Fast check for simple changes or trusted authors
+
+Choose a review mode:
+  0 - Use recommended mode (default)
+  1 - Fast Security Review
+  2 - Quick Review
+  q - Cancel
+
+Enter your choice [0]:
+```
+
+**When to use suggest:**
+
+- **Security changes** - Automatically detects auth, database, or security patterns
+- **Large PRs** - Recommends multi-agent mode for comprehensive coverage
+- **Unsure what to use** - Get tailored recommendations based on PR characteristics
+- **Cost optimization** - See multiple options with cost/time tradeoffs
+- **First-time users** - Learn which modes work best for different PR types
 
 ### Review a PR by URL
 
