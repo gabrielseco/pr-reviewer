@@ -23,6 +23,7 @@ async function handleReviewCommand(
     model?: "haiku" | "sonnet" | "opus";
     thinkingBudget?: number;
     minConfidence?: number;
+    interactive?: boolean;
   }
 ) {
   try {
@@ -73,6 +74,7 @@ async function handleReviewCommand(
       model: options.model,
       thinkingBudget: options.thinkingBudget,
       minConfidence: options.minConfidence,
+      interactive: options.interactive,
     });
   } catch (error) {
     console.error(
@@ -136,6 +138,10 @@ function configureReviewOptions(cmd: Command) {
     .option(
       "-s, --save-to <path>",
       "Path to save review as markdown file (e.g., /path/to/reviews)"
+    )
+    .option(
+      "-i, --interactive",
+      "Enable interactive Q&A mode after review completion"
     );
 }
 

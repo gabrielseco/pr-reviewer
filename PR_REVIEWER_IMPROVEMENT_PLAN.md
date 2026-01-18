@@ -218,71 +218,9 @@ function parseReviewWithConfidence(reviewText: string) {
 
 ---
 
-#### 3. Custom Rules File (BUGBOT.md-style) ⭐⭐⭐⭐
-**Effort:** 2 hours
-**Impact:** High - Enables codebase-specific knowledge
-**Cost increase:** Minimal (+500-1000 tokens)
-
-**Create `.pr-review-rules.md` support:**
-```markdown
-# PR Review Rules
-
-## Database Migration Checks
-- [ ] All migrations include rollback scripts
-- [ ] No direct column drops (use two-phase migration)
-- [ ] Indexes added for new foreign keys
-
-## API Contract Validation
-- [ ] Breaking changes documented in CHANGELOG
-- [ ] New endpoints include OpenAPI spec
-- [ ] Response types match TypeScript interfaces
-
-## Security Patterns
-- [ ] User input always validated with Zod schemas
-- [ ] SQL queries use parameterized statements
-- [ ] No sensitive data in logs (PII, tokens, passwords)
-
-## Known Bug Patterns
-- [ ] Don't use `Array.prototype.sort()` on production data (unstable in V8)
-- [ ] Always use UTC timestamps (not local time)
-- [ ] Rate limiting on all external API calls
-```
-
-**Implementation:**
-```typescript
-// Add to config.ts
-export interface Config {
-  defaultGuidelines?: string;
-  repoGuidelines?: Record<string, string>;
-  rulesFile?: string; // New: .pr-review-rules.md
-}
-
-// In reviewer.ts
-async function loadCustomRules(repoPath: string): Promise<string> {
-  const rulesPath = join(repoPath, '.pr-review-rules.md');
-  if (existsSync(rulesPath)) {
-    return await readFile(rulesPath, 'utf-8');
-  }
-  return '';
-}
-
-// Include in prompt
-if (customRules) {
-  prompt += `
-# Custom Review Rules
-
-Apply these codebase-specific rules as checklists:
-
-${customRules}
-`;
-}
-```
-
----
-
 ### Medium Effort (High Value)
 
-#### 4. Multi-Agent Parallel Review ⭐⭐⭐⭐
+#### 3. Multi-Agent Parallel Review ⭐⭐⭐⭐
 **Effort:** 1-2 days
 **Impact:** Very High - Specialized expertise per domain
 **Cost:** 4x base cost, but can use mixed models
@@ -431,189 +369,42 @@ const agents = [
 
 ---
 
-#### 5. RAG-Based Context Retrieval ⭐⭐⭐⭐⭐
-**Effort:** 2-3 days
-**Impact:** Transformative - See beyond the diff
-**Cost increase:** +$0.02 per review (~10%)
+#### ~~4. RAG-Based Context Retrieval~~ ⚠️ SKIP THIS
+**Status:** DEPRECATED - Use Agentic Review (Section 5) instead
 
-**What it does:**
+**Why skip this:**
+RAG pre-fetches context based on heuristics and adds everything to the prompt upfront. This is redundant with Agentic Review with Tool Use, which allows the agent to intelligently decide what context to fetch on-demand.
+
+**Comparison:**
+- **RAG approach:** Guess what's needed, fetch everything, add to prompt (might be irrelevant)
+- **Agentic approach:** Agent explores as needed, only fetches relevant context, can verify hunches
+
+**Recommendation:** Go straight to Agentic Review (Section 5) which provides superior context retrieval plus multi-turn reasoning.
+
+**Original plan (for reference):**
 - Finds files related to changed code
 - Retrieves function/class definitions
 - Discovers dependencies and imports
 - Includes test files for context
 
-**Architecture:**
-```typescript
-// src/context/retriever.ts
-export interface ContextRetriever {
-  gatherContext(prInfo: PRInfo): Promise<RetrievedContext>;
-}
+_(Implementation details removed - see Agentic Review section for superior approach)_
 
-export interface RetrievedContext {
-  relatedFiles: Array<{
-    path: string;
-    reason: string;
-    snippet: string;
-  }>;
-  symbolDefinitions: Array<{
-    name: string;
-    type: 'function' | 'class' | 'interface' | 'type';
-    location: string;
-    definition: string;
-  }>;
-  dependencies: Array<{
-    file: string;
-    imports: string[];
-  }>;
-  tests: Array<{
-    path: string;
-    relevantTests: string[];
-  }>;
-}
+---
 
-export class SimpleContextRetriever implements ContextRetriever {
-  async gatherContext(prInfo: PRInfo): Promise<RetrievedContext> {
-    // 1. Extract symbols from diff
-    const symbols = this.extractSymbols(prInfo.diff);
+#### 5. Agentic Review with Tool Use ⭐⭐⭐⭐⭐
+**Effort:** 1 week
+**Impact:** Game-changing - Agent can explore and reason
+**Cost:** ~$0.35 per medium PR (40% increase, massive value)
 
-    // 2. Find definitions (grep for "class Foo", "function bar")
-    const definitions = await this.findDefinitions(symbols);
+**What it enables:**
+- Agent can read files to understand context
+- Can search for symbol definitions
+- Can check git history
+- Can run grep to find patterns
+- Multi-turn reasoning and exploration
 
-    // 3. Find related files (same directory, imports)
-    const relatedFiles = await this.findRelatedFiles(prInfo.files);
-
-    // 4. Find test files
-    const tests = await this.findTestFiles(prInfo.files);
-
-    return { relatedFiles, symbolDefinitions: definitions, dependencies: [], tests };
-  }
-
-  private extractSymbols(diff: string): string[] {
-    // Parse diff for function calls, class names, etc.
-    const symbols: Set<string> = new Set();
-
-    // Match function calls: functionName(
-    const functionCalls = diff.matchAll(/\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g);
-    for (const match of functionCalls) {
-      symbols.add(match[1]);
-    }
-
-    // Match class names: new ClassName
-    const classNames = diff.matchAll(/\bnew\s+([A-Z][a-zA-Z0-9_$]*)/g);
-    for (const match of classNames) {
-      symbols.add(match[1]);
-    }
-
-    return Array.from(symbols);
-  }
-
-  private async findDefinitions(symbols: string[]): Promise<Array<any>> {
-    const definitions = [];
-
-    for (const symbol of symbols) {
-      // Search for class/function definitions
-      const classPattern = `class ${symbol}`;
-      const functionPattern = `function ${symbol}`;
-      const constPattern = `const ${symbol} =`;
-
-      // Use grep to find definitions
-      // TODO: Use proper AST parsing for better accuracy
-
-      definitions.push({
-        name: symbol,
-        type: 'unknown',
-        location: 'path/to/file.ts:line',
-        definition: '// definition snippet'
-      });
-    }
-
-    return definitions;
-  }
-
-  private async findRelatedFiles(changedFiles: string[]): Promise<Array<any>> {
-    // Find files that import the changed files
-    // Or files in the same directory
-    return [];
-  }
-
-  private async findTestFiles(changedFiles: string[]): Promise<Array<any>> {
-    // For each changed file, find corresponding test file
-    // e.g., src/foo.ts -> src/foo.test.ts or tests/foo.test.ts
-    return [];
-  }
-}
-
-// Advanced: AST-based retriever
-export class ASTContextRetriever implements ContextRetriever {
-  async gatherContext(prInfo: PRInfo): Promise<RetrievedContext> {
-    // Use TypeScript compiler API to parse files
-    // Build symbol graph
-    // Find relevant context based on data flow
-    // This is more accurate but more complex
-  }
-}
-```
-
-**Integration with review:**
-```typescript
-// In reviewer.ts
-export async function reviewPR(options: ReviewOptions): Promise<void> {
-  // ... existing code ...
-
-  // Gather additional context
-  const contextRetriever = new SimpleContextRetriever();
-  const retrievedContext = await contextRetriever.gatherContext(prInfo);
-
-  // Include in prompt
-  const prompt = buildReviewPromptWithContext(prInfo, reviewContext, retrievedContext);
-
-  // ... rest of review ...
-}
-
-function buildReviewPromptWithContext(
-  prInfo: PRInfo,
-  reviewContext: string,
-  retrieved: RetrievedContext
-): string {
-  let prompt = `You are an expert code reviewer.
-
-# Pull Request Information
-${/* ... existing PR info ... */}
-
-# Additional Context Retrieved
-
-## Related Files
-${retrieved.relatedFiles.map(f => `
-- **${f.path}** (${f.reason})
-\`\`\`
-${f.snippet}
-\`\`\`
-`).join('\n')}
-
-## Symbol Definitions
-${retrieved.symbolDefinitions.map(s => `
-- **${s.name}** (${s.type}) defined in ${s.location}
-\`\`\`
-${s.definition}
-\`\`\`
-`).join('\n')}
-
-## Related Tests
-${retrieved.tests.map(t => `
-- ${t.path}: ${t.relevantTests.join(', ')}
-`).join('\n')}
-
-# Pull Request Diff
-\`\`\`diff
-${prInfo.diff}
-\`\`\`
-
-${/* ... rest of prompt ... */}
-`;
-
-  return prompt;
-}
-```
+**Why this replaces RAG:**
+Instead of pre-fetching context blindly, the agent intelligently decides what to explore based on what it discovers in the diff. This is how Cursor's Bugbot works and why their detection rate improved from 52% to 70%+.
 
 ---
 
@@ -706,21 +497,9 @@ pr-review https://github.com/... --incremental --verbose
 
 ---
 
-### Advanced (Transformative)
+### Advanced Features
 
-#### 7. Agentic Review with Tool Use ⭐⭐⭐⭐⭐
-**Effort:** 1 week
-**Impact:** Game-changing - Agent can explore and reason
-**Cost:** ~$0.35 per medium PR (40% increase, massive value)
-
-**What it enables:**
-- Agent can read files to understand context
-- Can search for symbol definitions
-- Can check git history
-- Can run grep to find patterns
-- Multi-turn reasoning and exploration
-
-**Architecture:**
+#### 7. Interactive Review Mode ⭐⭐⭐⭐
 ```typescript
 // src/agentic/tools.ts
 export const REVIEW_TOOLS = [

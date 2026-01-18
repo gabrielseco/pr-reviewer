@@ -5,6 +5,7 @@ import { existsSync, mkdirSync } from "fs";
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { Spinner, bell } from "./spinner";
+import { startInteractiveQA } from "./interactive-qa";
 
 // Model configuration
 type ModelName = "haiku" | "sonnet" | "opus";
@@ -67,6 +68,7 @@ export interface ReviewOptions {
   model?: ModelName;
   thinkingBudget?: number; // Override thinking budget for models that support it
   minConfidence?: number; // Minimum confidence score to display (0-100, default: 70)
+  interactive?: boolean; // Enable interactive Q&A mode after review
 }
 
 export async function reviewPR(options: ReviewOptions): Promise<void> {
@@ -81,6 +83,7 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
     model = "haiku",
     thinkingBudget,
     minConfidence = 70,
+    interactive = false,
   } = options;
 
   // Get model configuration
@@ -247,6 +250,30 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
   // Bell notification to alert user that review is complete
   bell();
   console.log("\n✨ Review complete!");
+
+  // Start interactive Q&A mode if requested
+  if (interactive) {
+    // Build conversation history (initial prompt + review response)
+    const conversationHistory: Anthropic.MessageParam[] = [
+      {
+        role: "user",
+        content: prompt,
+      },
+      {
+        role: "assistant",
+        content: message.content,
+      },
+    ];
+
+    await startInteractiveQA({
+      anthropic,
+      modelId: modelConfig.id,
+      prInfo,
+      reviewContext,
+      conversationHistory,
+      minConfidence,
+    });
+  }
 }
 
 interface ReviewMetadata {

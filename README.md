@@ -248,6 +248,31 @@ bun run src/index.ts https://github.com/owner/repo/pull/123 --model sonnet
 bun run src/index.ts https://github.com/owner/repo/pull/123 --model opus
 ```
 
+## Interactive Q&A Mode
+
+After the review completes, you can ask follow-up questions about the findings. This is perfect for:
+
+- Understanding why specific issues were flagged
+- Getting suggested fixes for problems
+- Clarifying the reasoning behind recommendations
+- Learning more about security vulnerabilities or code smells
+
+```bash
+# Enable interactive mode with the --interactive (or -i) flag
+bun run src/index.ts https://github.com/owner/repo/pull/123 --interactive
+bun run src/index.ts https://github.com/owner/repo/pull/123 --model opus -i
+```
+
+**Example questions you can ask:**
+- "Why did you flag line 42?"
+- "Can you suggest a fix for the SQL injection issue?"
+- "Is this really a critical issue?"
+- "Show me an example of the correct pattern"
+
+Type `exit` or `quit` to end the interactive session.
+
+For full details and examples, see [INTERACTIVE_QA.md](./INTERACTIVE_QA.md).
+
 ## Options
 
 ```
@@ -257,6 +282,7 @@ Options:
   -c, --context <path>          Path to markdown file with review context
   -r, --repo <owner/repo>       GitHub repository (required if using PR number)
   -m, --model <model>           AI model: haiku (fast, cheap), sonnet (balanced), or opus (most capable) (default: "haiku")
+  -i, --interactive             Enable interactive Q&A mode after review completes
   -s, --save-to <path>          Path to save review as markdown file
   --thinking-budget <tokens>    Thinking token budget for opus model (default: 10000)
   --min-confidence <score>      Minimum confidence score to display issues (0-100, default: 70)
