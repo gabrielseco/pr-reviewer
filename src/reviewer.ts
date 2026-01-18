@@ -10,6 +10,7 @@ import { agenticReviewPR } from "./agentic/agentic-reviewer";
 import type { AgenticReviewOptions } from "./agentic/types";
 import { MODELS, type ModelName } from "./models.js";
 import { multiAgentReview, type MultiAgentOptions } from "./multi-agent-reviewer.js";
+import { multiAgenticReview, type MultiAgenticOptions } from "./multi-agent-agentic-reviewer.js";
 
 export interface ReviewOptions {
   prUrlOrNumber: string;
@@ -106,8 +107,88 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
   let claudeDuration: number = 0;
 
   // Check if multi-agent mode is enabled
-  if (multiAgent) {
-    // Multi-agent mode with parallel execution
+  if (multiAgent && agentic) {
+    // Multi-agent AGENTIC mode with tool access
+    const multiAgenticOptions: MultiAgenticOptions = {
+      agents,
+      minConfidence,
+      parallelExecution: true,
+      repoPath,
+      maxTurns,
+      showTools,
+    };
+
+    const claudeSpinner = new Spinner(
+      `Running agentic multi-agent review with tool access (${agents?.join(", ") || "all agents"})`
+    );
+    claudeSpinner.start();
+    const claudeStartTime = performance.now();
+
+    const result = await multiAgenticReview(
+      prInfo,
+      reviewContext,
+      anthropic,
+      multiAgenticOptions
+    );
+
+    claudeDuration = performance.now() - claudeStartTime;
+    claudeSpinner.succeed(
+      `Completed agentic multi-agent review (${(claudeDuration / 1000).toFixed(2)}s)`
+    );
+
+    // Display agent timing and tool usage
+    console.log("\n📊 Agent Performance:");
+    for (const [agentName, duration] of Object.entries(result.timing.perAgent)) {
+      const agentReview = result.agentReviews.find((r) => r.agentName === agentName);
+      const issueCount = agentReview?.issues.length || 0;
+      const toolCount = agentReview?.toolUsage.reduce((sum, t) => sum + t.callCount, 0) || 0;
+      console.log(
+        `   ${agentName}: ${(duration / 1000).toFixed(2)}s (${issueCount} issues, ${toolCount} tool calls)`
+      );
+    }
+
+    console.log(`\n🔧 Total Tool Calls: ${result.totalToolCalls}`);
+
+    // Build review text from multi-agent agentic results
+    reviewText = result.summary + "\n\n";
+
+    // Group issues by severity
+    const criticalIssues = result.issues.filter((i) => i.severity === "critical");
+    const highIssues = result.issues.filter((i) => i.severity === "high");
+    const mediumIssues = result.issues.filter((i) => i.severity === "medium");
+    const lowIssues = result.issues.filter((i) => i.severity === "low");
+
+    const formatIssues = (issues: typeof result.issues, title: string) => {
+      if (issues.length === 0) return "";
+      let text = `## ${title}\n\n`;
+      for (const issue of issues) {
+        text += `**[CONFIDENCE: ${issue.confidence}]** ${issue.line ? `Line ${issue.line}:` : ""} ${issue.message}\n\n`;
+      }
+      return text;
+    };
+
+    reviewText += formatIssues(criticalIssues, "Critical Issues");
+    reviewText += formatIssues(highIssues, "High Priority Issues");
+    reviewText += formatIssues(mediumIssues, "Medium Priority Issues");
+    reviewText += formatIssues(lowIssues, "Low Priority Issues");
+
+    // Calculate token usage from all agents
+    inputTokens = result.agentReviews.reduce((sum, r) => sum + r.usage.inputTokens, 0);
+    outputTokens = result.agentReviews.reduce((sum, r) => sum + r.usage.outputTokens, 0);
+
+    // Build conversation history for interactive mode
+    conversationHistory = [
+      {
+        role: "user",
+        content: `Multi-agent agentic review of PR: ${prInfo.title}`,
+      },
+      {
+        role: "assistant",
+        content: reviewText,
+      },
+    ];
+  } else if (multiAgent) {
+    // Multi-agent mode with parallel execution (NO tools)
     const multiAgentOptions: MultiAgentOptions = {
       agents,
       minConfidence,
@@ -200,7 +281,7 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
       number: prInfo.prNumber,
       title: prInfo.title,
       description: prInfo.description || "No description provided",
-      author: prInfo.author || "Unknown",
+      author: "GitHub User",
       files: prInfo.files
         .map(
           (f) => `- ${f.filename} (${f.status}, +${f.additions}/-${f.deletions})`
