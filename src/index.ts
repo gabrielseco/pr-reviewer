@@ -24,6 +24,10 @@ async function handleReviewCommand(
     thinkingBudget?: number;
     minConfidence?: number;
     interactive?: boolean;
+    agentic?: boolean;
+    maxTurns?: number;
+    showTools?: boolean;
+    repoPath?: string;
   }
 ) {
   try {
@@ -75,6 +79,10 @@ async function handleReviewCommand(
       thinkingBudget: options.thinkingBudget,
       minConfidence: options.minConfidence,
       interactive: options.interactive,
+      agentic: options.agentic,
+      maxTurns: options.maxTurns,
+      showTools: options.showTools,
+      repoPath: options.repoPath,
     });
   } catch (error) {
     console.error(
@@ -142,6 +150,29 @@ function configureReviewOptions(cmd: Command) {
     .option(
       "-i, --interactive",
       "Enable interactive Q&A mode after review completion"
+    )
+    .option(
+      "--agentic",
+      "Enable agentic mode with tool use for deeper code exploration"
+    )
+    .option(
+      "--max-turns <number>",
+      "Maximum number of agentic turns (default: 10)",
+      (value) => {
+        const parsed = parseInt(value, 10);
+        if (isNaN(parsed) || parsed < 1 || parsed > 30) {
+          throw new Error("max-turns must be a number between 1 and 30");
+        }
+        return parsed;
+      }
+    )
+    .option(
+      "--show-tools",
+      "Display tool usage during agentic review"
+    )
+    .option(
+      "--repo-path <path>",
+      "Local repository path for tool execution (defaults to current working directory)"
     );
 }
 

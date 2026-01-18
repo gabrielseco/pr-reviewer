@@ -6,6 +6,7 @@ An AI-powered GitHub Pull Request reviewer using Anthropic's Claude API. This CL
 
 - Review any GitHub PR using Claude AI
 - **Interactive mode** - Just run the tool without arguments and it will guide you through the process
+- **Agentic mode** - Enable Claude to explore your codebase using tools for deeper analysis
 - **Configuration file** - Auto-detect guidelines based on repository
 - **Model selection** - Choose between Haiku (fast, cheap), Sonnet (balanced), or Opus (most capable with extended thinking)
 - **Confidence scoring** - Every issue includes a confidence score (0-100) to reduce false positives
@@ -229,11 +230,51 @@ Each issue in the review will include its confidence score:
 **[CONFIDENCE: 72] Line 203:** N+1 query pattern could cause performance issues at scale
 ```
 
-## Model Selection
+## Choosing the Right Review Configuration
 
-Choose the right model for your needs:
+Not all PRs need the same level of scrutiny. Here's a quick guide to help you choose:
 
-- **haiku** (default): Fast and cheap ($0.003-0.01 per review), good for quick checks
+| PR Type | Recommended Command | Cost | Why |
+|---------|-------------------|------|-----|
+| **Simple bug fix** | `bun run src/index.ts <PR> --model haiku` | ~$0.01 | Fast, cheap, sufficient for obvious fixes |
+| **Documentation** | `bun run src/index.ts <PR> --model haiku` | ~$0.01 | No need for deep analysis |
+| **Refactoring** | `bun run src/index.ts <PR> --model sonnet` | ~$0.10 | Better at catching subtle logic issues |
+| **New features** | `bun run src/index.ts <PR> --model sonnet --agentic` | ~$0.15 | Explores dependencies and usage patterns |
+| **Security changes** | `bun run src/index.ts <PR> --model opus --agentic` | ~$0.50 | Most thorough, reads full context |
+| **Breaking changes** | `bun run src/index.ts <PR> --model opus --agentic` | ~$0.50 | Finds all affected code |
+| **Critical/production** | `bun run src/index.ts <PR> --model opus --agentic --min-confidence 85` | ~$0.50 | Maximum accuracy, high confidence threshold |
+
+### Quick Decision Guide
+
+**Use Haiku (default) for:**
+- Typo fixes
+- Documentation updates
+- Simple one-line changes
+- Obvious bug fixes
+- Dependency bumps
+
+**Use Sonnet for:**
+- Multi-file changes
+- Logic updates
+- Test additions
+- Medium refactoring
+
+**Use Opus for:**
+- Authentication/authorization changes
+- Payment processing
+- Data migration
+- Architectural changes
+- Anything touching sensitive data
+
+**Add --agentic when:**
+- You need to check symbol usages across the codebase
+- The PR modifies public APIs
+- You want to verify all callers are updated
+- The change might have hidden dependencies
+
+### Model Details
+
+- **haiku**: Fast and cheap ($0.003-0.01 per review), good for quick checks
 - **sonnet**: Balanced performance ($0.04-0.15 per review), better at catching subtle issues
 - **opus**: Most capable with extended thinking ($0.10-0.90 per review), best for critical reviews
 
@@ -246,6 +287,9 @@ bun run src/index.ts https://github.com/owner/repo/pull/123 --model sonnet
 
 # Deep review with Opus + extended thinking
 bun run src/index.ts https://github.com/owner/repo/pull/123 --model opus
+
+# Critical PR with full exploration
+bun run src/index.ts https://github.com/owner/repo/pull/123 --model opus --agentic
 ```
 
 ## Interactive Q&A Mode
@@ -272,6 +316,38 @@ bun run src/index.ts https://github.com/owner/repo/pull/123 --model opus -i
 Type `exit` or `quit` to end the interactive session.
 
 For full details and examples, see [INTERACTIVE_QA.md](./INTERACTIVE_QA.md).
+
+## Agentic Review Mode
+
+Enable Claude to actively explore your codebase during PR review using tools like file reading, code search, symbol lookup, and git history. This provides significantly deeper analysis than standard reviews.
+
+```bash
+# Enable agentic mode
+bun run src/index.ts review https://github.com/owner/repo/pull/123 --agentic
+
+# With options
+bun run src/index.ts review https://github.com/owner/repo/pull/123 \
+  --agentic \
+  --max-turns 15 \
+  --show-tools \
+  --model opus
+```
+
+**Benefits:**
+- Reads full file contents, not just diffs
+- Searches for symbol usages and definitions across the codebase
+- Checks git history for context
+- Provides more comprehensive security and logic analysis
+
+**When to use:**
+- Security-sensitive PRs
+- Large refactors or architectural changes
+- Breaking changes
+- Complex logic changes
+
+**Note:** Agentic mode costs ~40% more due to multiple API calls and requires a local repository clone.
+
+For full details, see [AGENTIC_MODE.md](./AGENTIC_MODE.md).
 
 ## Options
 

@@ -6,6 +6,8 @@ import { readFile } from "fs/promises";
 import { join } from "path";
 import { Spinner, bell } from "./spinner";
 import { startInteractiveQA } from "./interactive-qa";
+import { agenticReviewPR } from "./agentic/agentic-reviewer";
+import type { AgenticReviewOptions } from "./agentic/types";
 
 // Model configuration
 type ModelName = "haiku" | "sonnet" | "opus";
@@ -69,6 +71,10 @@ export interface ReviewOptions {
   thinkingBudget?: number; // Override thinking budget for models that support it
   minConfidence?: number; // Minimum confidence score to display (0-100, default: 70)
   interactive?: boolean; // Enable interactive Q&A mode after review
+  agentic?: boolean; // Enable agentic mode with tool use
+  maxTurns?: number; // Maximum number of agentic turns
+  showTools?: boolean; // Display tool usage during review
+  repoPath?: string; // Local repository path for tool execution
 }
 
 export async function reviewPR(options: ReviewOptions): Promise<void> {
@@ -84,6 +90,10 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
     thinkingBudget,
     minConfidence = 70,
     interactive = false,
+    agentic = false,
+    maxTurns = 10,
+    showTools = false,
+    repoPath = process.cwd(),
   } = options;
 
   // Get model configuration
@@ -131,40 +141,151 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
   // Create Anthropic client
   const anthropic = new Anthropic({ apiKey: anthropicKey });
 
-  // Build the review prompt
-  const prompt = buildReviewPrompt(prInfo, reviewContext, minConfidence);
+  // Variables for review results
+  let reviewText: string;
+  let conversationHistory: Anthropic.MessageParam[];
+  let inputTokens: number;
+  let outputTokens: number;
+  let thinkingTokens: number = 0;
+  let turnCount: number = 1;
+  let claudeDuration: number = 0;
 
-  // Call Claude API with timing
-  const claudeSpinner = new Spinner(
-    `Generating review with Claude AI (${model}${thinkingConfig ? " + thinking" : ""})`
-  );
-  claudeSpinner.start();
-  const claudeStartTime = performance.now();
-  const message = await anthropic.messages.create({
-    model: modelConfig.id,
-    max_tokens: modelConfig.maxTokens,
-    ...(thinkingConfig && { thinking: thinkingConfig }),
-    messages: [
+  // Check if agentic mode is enabled
+  if (agentic) {
+    // Agentic mode with tool use
+    const agenticOptions: AgenticReviewOptions = {
+      maxTurns,
+      showTools,
+      repoPath,
+      verbose: true,
+    };
+
+    const claudeSpinner = new Spinner(
+      `Performing agentic review with Claude AI (${model})`
+    );
+    claudeSpinner.start();
+    const claudeStartTime = performance.now();
+
+    // Prepare PR info for agentic reviewer
+    const agenticPRInfo = {
+      number: prInfo.prNumber,
+      title: prInfo.title,
+      description: prInfo.description || "No description provided",
+      author: prInfo.author || "Unknown",
+      files: prInfo.files
+        .map(
+          (f) => `- ${f.filename} (${f.status}, +${f.additions}/-${f.deletions})`
+        )
+        .join("\n"),
+      diff: prInfo.diff,
+    };
+
+    const result = await agenticReviewPR(
+      agenticPRInfo,
+      reviewContext,
+      minConfidence,
+      anthropic,
+      modelConfig.id,
+      agenticOptions
+    );
+
+    claudeDuration = performance.now() - claudeStartTime;
+    claudeSpinner.succeed(
+      `Completed agentic review in ${result.turnCount} turns (${(
+        claudeDuration / 1000
+      ).toFixed(2)}s)`
+    );
+
+    reviewText = result.reviewText;
+    conversationHistory = result.messages;
+    turnCount = result.turnCount;
+
+    // Display tool usage stats
+    if (result.toolUsage.length > 0) {
+      console.log("\n📊 Tool Usage:");
+      for (const tool of result.toolUsage) {
+        console.log(
+          `   ${tool.toolName}: ${tool.callCount} calls (${tool.totalTimeMs}ms total)`
+        );
+      }
+    }
+
+    // For agentic mode, we need to calculate token usage from all messages
+    // This is a simplified approach - in production you'd track this more carefully
+    inputTokens = 0;
+    outputTokens = 0;
+    // Note: We can't easily get exact token counts for agentic mode without storing
+    // each API response. For now, we'll estimate or show N/A
+    console.log(
+      "\n⚠️  Note: Token usage tracking for agentic mode is limited. Use --show-tools for detailed execution info."
+    );
+  } else {
+    // Standard single-pass review
+    const prompt = buildReviewPrompt(prInfo, reviewContext, minConfidence);
+
+    const claudeSpinner = new Spinner(
+      `Generating review with Claude AI (${model}${thinkingConfig ? " + thinking" : ""})`
+    );
+    claudeSpinner.start();
+    const claudeStartTime = performance.now();
+    const message = await anthropic.messages.create({
+      model: modelConfig.id,
+      max_tokens: modelConfig.maxTokens,
+      ...(thinkingConfig && { thinking: thinkingConfig }),
+      messages: [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+    });
+    claudeDuration = performance.now() - claudeStartTime;
+    claudeSpinner.succeed(
+      `Generated review with Claude AI (${model}${thinkingConfig ? " + thinking" : ""}) (${(
+        claudeDuration / 1000
+      ).toFixed(2)}s)`
+    );
+
+    // Extract token usage and calculate costs
+    inputTokens = message.usage.input_tokens;
+    outputTokens = message.usage.output_tokens;
+
+    // For models with thinking, extract thinking tokens (if available)
+    // @ts-expect-error - thinking_tokens may not exist in all responses
+    thinkingTokens = message.usage.thinking_tokens || 0;
+
+    // Extract review text
+    const textContent = message.content.find((block) => block.type === "text");
+    reviewText =
+      textContent && textContent.type === "text" ? textContent.text : "";
+
+    // Build conversation history for interactive mode
+    conversationHistory = [
       {
         role: "user",
         content: prompt,
       },
-    ],
-  });
-  const claudeDuration = performance.now() - claudeStartTime;
-  claudeSpinner.succeed(
-    `Generated review with Claude AI (${model}${thinkingConfig ? " + thinking" : ""}) (${(
-      claudeDuration / 1000
-    ).toFixed(2)}s)`
-  );
+      {
+        role: "assistant",
+        content: message.content,
+      },
+    ];
+  }
 
-  // Extract token usage and calculate costs
-  const inputTokens = message.usage.input_tokens;
-  const outputTokens = message.usage.output_tokens;
+  // Display the review
+  console.log("\n" + "=".repeat(80));
+  console.log("CODE REVIEW");
+  console.log("=".repeat(80));
+  console.log();
 
-  // For models with thinking, extract thinking tokens (if available)
-  // @ts-expect-error - thinking_tokens may not exist in all responses
-  const thinkingTokens = message.usage.thinking_tokens || 0;
+  if (reviewText) {
+    console.log(reviewText);
+  } else {
+    console.log("No review text generated.");
+  }
+
+  console.log();
+  console.log("=".repeat(80));
 
   // Calculate costs using model-specific pricing
   const inputCost = (inputTokens / 1_000_000) * modelConfig.pricing.input;
@@ -174,55 +295,43 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
     : 0;
   const totalCost = inputCost + outputCost + thinkingCost;
 
-  // Display the review
-  console.log("=".repeat(80));
-  console.log("CODE REVIEW");
-  console.log("=".repeat(80));
-  console.log();
-
-  const textContent = message.content.find((block) => block.type === "text");
-  const reviewText =
-    textContent && textContent.type === "text" ? textContent.text : "";
-
-  if (reviewText) {
-    console.log(reviewText);
-  }
-
-  console.log();
-  console.log("=".repeat(80));
-
   // Display timing and cost information
   const totalDuration = performance.now() - startTime;
   console.log("\n📊 Review Statistics:");
   console.log(`   Model: ${model} (${modelConfig.id})`);
+  if (agentic) {
+    console.log(`   Mode: agentic (${turnCount} turns)`);
+  }
   if (thinkingTokens > 0) {
     console.log(`   Thinking: enabled (${thinkingTokens.toLocaleString()} tokens)`);
   }
   console.log(`   Confidence threshold: ${minConfidence}% (only showing issues ≥${minConfidence})`);
   console.log(`   GitHub API time: ${(githubDuration / 1000).toFixed(2)}s`);
-  console.log(`   Claude API time: ${(claudeDuration / 1000).toFixed(2)}s`);
   console.log(`   Total time: ${(totalDuration / 1000).toFixed(2)}s`);
-  console.log(`\n💰 Token Usage & Cost:`);
-  console.log(`   Input tokens: ${inputTokens.toLocaleString()}`);
-  console.log(`   Output tokens: ${outputTokens.toLocaleString()}`);
-  if (thinkingTokens > 0) {
-    console.log(`   Thinking tokens: ${thinkingTokens.toLocaleString()}`);
-  }
-  console.log(
-    `   Total tokens: ${(inputTokens + outputTokens + thinkingTokens).toLocaleString()}`
-  );
-  if (thinkingTokens > 0) {
+
+  if (!agentic || (inputTokens > 0 && outputTokens > 0)) {
+    console.log(`\n💰 Token Usage & Cost:`);
+    console.log(`   Input tokens: ${inputTokens.toLocaleString()}`);
+    console.log(`   Output tokens: ${outputTokens.toLocaleString()}`);
+    if (thinkingTokens > 0) {
+      console.log(`   Thinking tokens: ${thinkingTokens.toLocaleString()}`);
+    }
     console.log(
-      `   Cost: $${totalCost.toFixed(4)} ($${inputCost.toFixed(
-        4
-      )} input + $${outputCost.toFixed(4)} output + $${thinkingCost.toFixed(4)} thinking)`
+      `   Total tokens: ${(inputTokens + outputTokens + thinkingTokens).toLocaleString()}`
     );
-  } else {
-    console.log(
-      `   Cost: $${totalCost.toFixed(4)} ($${inputCost.toFixed(
-        4
-      )} input + $${outputCost.toFixed(4)} output)`
-    );
+    if (thinkingTokens > 0) {
+      console.log(
+        `   Cost: $${totalCost.toFixed(4)} ($${inputCost.toFixed(
+          4
+        )} input + $${outputCost.toFixed(4)} output + $${thinkingCost.toFixed(4)} thinking)`
+      );
+    } else {
+      console.log(
+        `   Cost: $${totalCost.toFixed(4)} ($${inputCost.toFixed(
+          4
+        )} input + $${outputCost.toFixed(4)} output)`
+      );
+    }
   }
   console.log(
     `\n🔗 Review URL: https://github.com/${prInfo.owner}/${prInfo.repo}/pull/${prInfo.prNumber}`
@@ -253,18 +362,7 @@ export async function reviewPR(options: ReviewOptions): Promise<void> {
 
   // Start interactive Q&A mode if requested
   if (interactive) {
-    // Build conversation history (initial prompt + review response)
-    const conversationHistory: Anthropic.MessageParam[] = [
-      {
-        role: "user",
-        content: prompt,
-      },
-      {
-        role: "assistant",
-        content: message.content,
-      },
-    ];
-
+    // Conversation history is already built in both agentic and standard modes
     await startInteractiveQA({
       anthropic,
       modelId: modelConfig.id,
