@@ -33,7 +33,12 @@ const SECURITY_PATHS = [
   '/session/', '/token/', '/crypto/', '/oauth/'
 ];
 
-const DATABASE_KEYWORDS = ['database', 'sql', 'query', 'migration', 'schema', 'orm'];
+const DATABASE_KEYWORDS = [
+  'database', 'sql', 'query', 'migration', 'orm',
+  'db schema', 'database schema', 'table schema', // More specific schema mentions
+  'prisma', 'sequelize', 'typeorm', 'knex', // ORMs
+  'alter table', 'create table', 'drop table' // SQL operations
+];
 const DATABASE_PATHS = ['/migrations/', '/database/', '/db/', '/models/', '/entities/'];
 const DATABASE_EXTENSIONS = ['.sql', '.prisma', '.schema'];
 
@@ -74,6 +79,13 @@ export function analyzePR(prInfo: PRInfo, userDescription?: string): PRAnalysis 
            lower.includes('/tests/');
   });
 
+  // Detect if this is JSON Schema related (not database schema)
+  const isJsonSchema = textContent.includes('json schema') ||
+                       textContent.includes('jsonschema') ||
+                       textContent.includes('jsf') ||
+                       pathsContent.includes('schema.json') ||
+                       pathsContent.includes('jsonschema');
+
   // Detect keywords
   const keywords = {
     security: containsAny(textContent, SECURITY_KEYWORDS) ||
@@ -87,9 +99,10 @@ export function analyzePR(prInfo: PRInfo, userDescription?: string): PRAnalysis 
                                            p.toLowerCase().includes('doc')),
     bugfix: containsAny(textContent, BUG_KEYWORDS),
     feature: containsAny(textContent, FEATURE_KEYWORDS),
-    database: containsAny(textContent, DATABASE_KEYWORDS) ||
+    database: !isJsonSchema && (
+              containsAny(textContent, DATABASE_KEYWORDS) ||
               containsAny(pathsContent, DATABASE_PATHS) ||
-              Array.from(fileTypes).some(ext => DATABASE_EXTENSIONS.includes(ext)),
+              Array.from(fileTypes).some(ext => DATABASE_EXTENSIONS.includes(ext))),
     auth: textContent.includes('auth') || textContent.includes('login') ||
           textContent.includes('password'),
     performance: containsAny(textContent, PERFORMANCE_KEYWORDS)
