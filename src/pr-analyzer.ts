@@ -44,7 +44,7 @@ const BUG_KEYWORDS = ['fix', 'bug', 'bugfix', 'hotfix', 'patch', 'issue'];
 const FEATURE_KEYWORDS = ['feature', 'add', 'implement', 'new'];
 const PERFORMANCE_KEYWORDS = ['performance', 'optimize', 'speed', 'cache', 'efficient'];
 
-export function analyzePR(prInfo: PRInfo): PRAnalysis {
+export function analyzePR(prInfo: PRInfo, userDescription?: string): PRAnalysis {
   const fileTypes = new Set<string>();
   const modifiedPaths: string[] = [];
   let linesAdded = 0;
@@ -62,9 +62,17 @@ export function analyzePR(prInfo: PRInfo): PRAnalysis {
   const totalLines = linesAdded + linesRemoved;
   const filesChanged = prInfo.files.length;
 
-  // Analyze text content
-  const textContent = `${prInfo.title} ${prInfo.description}`.toLowerCase();
+  // Analyze text content - include user description if provided
+  const textContent = `${prInfo.title} ${prInfo.description} ${userDescription || ''}`.toLowerCase();
   const pathsContent = modifiedPaths.join(' ').toLowerCase();
+
+  // Detect if changes are test-only
+  const isTestOnly = modifiedPaths.every(p => {
+    const lower = p.toLowerCase();
+    return lower.includes('.test.') || lower.includes('.spec.') ||
+           lower.includes('__tests__') || lower.includes('/test/') ||
+           lower.includes('/tests/');
+  });
 
   // Detect keywords
   const keywords = {
@@ -88,10 +96,10 @@ export function analyzePR(prInfo: PRInfo): PRAnalysis {
   };
 
   // Determine complexity
-  const complexity = determineComplexity(filesChanged, totalLines, keywords);
+  const complexity = determineComplexity(filesChanged, totalLines, keywords, isTestOnly);
 
   // Determine risk level
-  const riskLevel = determineRiskLevel(keywords, complexity, filesChanged);
+  const riskLevel = determineRiskLevel(keywords, complexity, filesChanged, isTestOnly);
 
   return {
     filesChanged,
@@ -113,8 +121,16 @@ function containsAny(text: string, keywords: string[]): boolean {
 function determineComplexity(
   filesChanged: number,
   totalLines: number,
-  keywords: { [key: string]: boolean }
+  keywords: { [key: string]: boolean },
+  isTestOnly: boolean
 ): 'low' | 'medium' | 'high' | 'very-high' {
+  // Test-only changes are generally lower complexity
+  if (isTestOnly) {
+    if (totalLines <= 200) return 'low';
+    if (totalLines <= 500) return 'medium';
+    return 'high'; // Never very-high for tests
+  }
+
   // Documentation-only changes are always low complexity
   if (keywords.documentation && filesChanged < 5 && totalLines < 200) {
     return 'low';
@@ -142,8 +158,16 @@ function determineComplexity(
 function determineRiskLevel(
   keywords: { [key: string]: boolean },
   complexity: string,
-  filesChanged: number
+  filesChanged: number,
+  isTestOnly: boolean
 ): 'low' | 'medium' | 'high' | 'critical' {
+  // Test-only changes are inherently lower risk
+  if (isTestOnly) {
+    // Even refactoring tests is low-medium risk
+    if (keywords.refactor || complexity === 'low') return 'low';
+    return 'medium'; // Never high/critical for tests
+  }
+
   // Critical: Security + breaking changes, or auth + database
   if ((keywords.security && keywords.breaking) ||
       (keywords.auth && keywords.database)) {

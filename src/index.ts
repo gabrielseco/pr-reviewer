@@ -225,8 +225,35 @@ async function handleSuggestCommand(
     console.log("🔍 Analyzing PR...\n");
     const prInfo = await fetchPRInfo(prUrlOrNumber, options.repo, githubToken);
 
-    // Analyze the PR
-    const analysis = analyzePR(prInfo);
+    // Ask user to describe their changes
+    console.log("📝 To provide better recommendations, please describe your changes:");
+    console.log("   (e.g., 'refactor testing by mocking select component', 'add authentication', 'fix memory leak')\n");
+
+    process.stdout.write("Your description: ");
+    const userDescription = await new Promise<string>((resolve) => {
+      const stdin = process.stdin;
+      stdin.resume();
+      stdin.setEncoding('utf8');
+
+      let input = '';
+      const onData = (chunk: string) => {
+        const lines = chunk.split('\n');
+        if (lines.length > 1) {
+          input += lines[0];
+          stdin.pause();
+          stdin.removeListener('data', onData);
+          console.log('');
+          resolve(input.trim());
+        } else {
+          input += chunk;
+        }
+      };
+
+      stdin.on('data', onData);
+    });
+
+    // Analyze the PR with user description
+    const analysis = analyzePR(prInfo, userDescription);
 
     // Generate recommendations
     const recommendations = generateRecommendations(analysis);
